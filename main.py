@@ -1,52 +1,36 @@
 import asyncio
-import importlib.util
 from pathlib import Path
 
-from browser_use import Agent, Browser, ChatOpenAI
+from browser_use import BrowserSession, ChatOpenAI
 
-from tool_generator import generate_tool
+from orchestrator import run_orchestrator
+from task_decomposer import decompose_task
 
-TASK_NAME = "login_erp"
 TOOLS_DIR = Path("tools")
+
+TASK = """
+Acesse o ERP da systextil e faça login com usuario: INTERSYS , senha: A%h^9l89
+Site:
+- LINK ERP: https://devs.systextil.com.br/systextil/
+"""
 
 
 async def main():
-    tool_path = TOOLS_DIR / f"{TASK_NAME}.py"
-
-    # Se a tool já existe, executar diretamente (sem LLM)
-    if tool_path.exists():
-        print(f"[main] Executando tool cached: {tool_path}")
-        spec = importlib.util.spec_from_file_location(TASK_NAME, tool_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        await module.run()
-        return
-
-    # 1ª execução: usar o agente LLM
-    print("[main] Nenhuma tool encontrada. Executando com agente LLM...")
-
-    browser = Browser(cdp_url='http://localhost:9222')
     llm = ChatOpenAI(model='gpt-5.1')
 
-    task = f"""
-    Acesse o ERP da systextil e faça login com usuario: INTERSYS , senha: A%h^9l89
-    Site:
-    - LINK ERP: https://devs.systextil.com.br/systextil/
-    """
+    # Uma única sessão de browser compartilhada entre todos os steps
+    browser_session = BrowserSession(cdp_url='http://localhost:9222')
+    await browser_session.start()
 
-    agent = Agent(
-        browser=browser,
-        llm=llm,
-        task=task,
-    )
+    print("[main] Decompondo task em steps...")
+    steps = await decompose_task(TASK, TOOLS_DIR, llm)
+    for step in steps:
+        cached = (TOOLS_DIR / f"{step.tool_name}.py").exists()
+        status = "cached" if cached else "LLM"
+        print(f"  Step {step.order}: [{status}] {step.tool_name}")
 
-    result = await agent.run()
-
-    # Gerar o script Playwright automaticamente a partir do histórico
-    await generate_tool(TASK_NAME, result, llm)
-    print("[main] Tool gerada! Próximas execuções serão sem LLM.")
-
-    return result
+    await run_orchestrator(steps, browser_session, llm, TOOLS_DIR)
+    print("[main] Task completa.")
 
 
 if __name__ == '__main__':
