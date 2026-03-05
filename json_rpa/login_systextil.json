@@ -1,0 +1,90 @@
+{
+  "workflow_analysis": "Recorded workflow with 8 steps. ",
+  "name": "Recorded Workflow (Semantic)",
+  "description": "Recorded on 05/03/2026, 15:05:51",
+  "version": "1.0",
+  "input_schema": [],
+  "steps": [
+    {
+      "type": "navigation",
+      "timestamp": 1772733936365,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8"
+    },
+    {
+      "type": "scroll",
+      "timestamp": 1772733936601,
+      "tabId": 1380723963,
+      "targetId": 54,
+      "scrollX": 0,
+      "scrollY": 0,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8"
+    },
+    {
+      "type": "click",
+      "timestamp": 1772733937854,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "xpath": "id(\"box1.\")/div[3]/input[1]",
+      "elementTag": "INPUT",
+      "elementText": "",
+      "targetText": "USUÁRIO"
+    },
+    {
+      "type": "input",
+      "timestamp": 1772733941162,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "xpath": "id(\"box1.\")/div[3]/input[1]",
+      "elementTag": "INPUT",
+      "value": "INTERSYS",
+      "targetText": "USUÁRIO"
+    },
+    {
+      "type": "click",
+      "timestamp": 1772733942298,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "xpath": "id(\"box1.\")/div[4]/input[1]",
+      "elementTag": "INPUT",
+      "elementText": "",
+      "targetText": "SENHA"
+    },
+    {
+      "type": "key_press",
+      "timestamp": 1772733944302,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "key": "CmdOrCtrl+V",
+      "xpath": "id(\"box1.\")/div[4]/input[1]",
+      "cssSelector": "input[type=\"password\"][name=\"box1:senha_tela.\"][placeholder=\"SENHA\"]",
+      "elementTag": "INPUT"
+    },
+    {
+      "type": "input",
+      "timestamp": 1772733944306,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "xpath": "id(\"box1.\")/div[4]/input[1]",
+      "elementTag": "INPUT",
+      "value": "********",
+      "targetText": "SENHA"
+    },
+    {
+      "type": "click",
+      "timestamp": 1772733945928,
+      "tabId": 1380723963,
+      "url": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "frameUrl": "https://devs.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN56_AOnu6xRedW59zb_aneFaZ-8#0x",
+      "xpath": "id(\"box1:button1.\")",
+      "elementTag": "INPUT",
+      "elementText": "",
+      "targetText": "Acessar"
+    }
+  ]
+}

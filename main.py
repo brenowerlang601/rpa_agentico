@@ -1,42 +1,40 @@
-import asyncio
+import sys
 from pathlib import Path
 
-from browser_use import BrowserSession, ChatOpenAI
+from json_processor import list_json_rpa, process_json
 
-from orchestrator import run_orchestrator
-from task_decomposer import decompose_task
-
-TOOLS_DIR = Path("tools")
-
-TASK = """
-Acesse o ERP da systextil e faça login com usuario: INTERSYS , senha: A%h^9l89
-Site:
-- LINK ERP: https://devs.systextil.com.br/systextil/
-E acesse a tela no indo no buscar programa na parte superior da tela pedi_f130.
-Ao entrar na tela preencha o campo de pedido de: com o numero 1 após preencher esse campo va para o proximo que se chama tipo pedido e preencha com o valor 1
-"""
+JSON_RPA_DIR = Path("json_rpa")
 
 
-async def main():
-    llm = ChatOpenAI(model='gpt-5.1')
+def main():
+    files = list_json_rpa(JSON_RPA_DIR)
 
-    # Uma única sessão de browser compartilhada entre todos os steps
-    browser_session = BrowserSession(cdp_url='http://localhost:9222')
-    await browser_session.start()
+    if not files:
+        print("Nenhum arquivo JSON encontrado em json_rpa/")
+        sys.exit(1)
 
-    print("[main] Decompondo task em steps...")
-    steps = await decompose_task(TASK, TOOLS_DIR, llm)
-    for step in steps:
-        cached = (TOOLS_DIR / f"{step.tool_name}.py").exists()
-        status = "cached" if cached else "LLM"
-        print(f"  Step {step.order}: [{status}] {step.tool_name}")
+    if len(sys.argv) > 1:
+        selected = Path(sys.argv[1])
+        if not selected.exists():
+            selected = JSON_RPA_DIR / sys.argv[1]
+        if not selected.exists():
+            print(f"Arquivo nao encontrado: {sys.argv[1]}")
+            sys.exit(1)
+    elif len(files) == 1:
+        selected = files[0]
+    else:
+        print("JSONs disponíveis em json_rpa/:")
+        for idx, f in enumerate(files):
+            print(f"  {idx + 1}. {f.name}")
+        choice = input("Escolha o número do arquivo: ").strip()
+        try:
+            selected = files[int(choice) - 1]
+        except (ValueError, IndexError):
+            print("Escolha inválida.")
+            sys.exit(1)
 
-    try:
-        await run_orchestrator(steps, browser_session, llm, TOOLS_DIR)
-        print("[main] Task completa.")
-    finally:
-        await browser_session.stop()
+    process_json(selected)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
