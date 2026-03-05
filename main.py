@@ -12,6 +12,8 @@ TASK = """
 Acesse o ERP da systextil e faça login com usuario: INTERSYS , senha: A%h^9l89
 Site:
 - LINK ERP: https://devs.systextil.com.br/systextil/
+E acesse a tela no indo no buscar programa na parte superior da tela pedi_f130.
+Ao entrar na tela preencha o campo de pedido de: com o numero 1 após preencher esse campo va para o proximo que se chama tipo pedido e preencha com o valor 1
 """
 
 
@@ -29,8 +31,11 @@ async def main():
         status = "cached" if cached else "LLM"
         print(f"  Step {step.order}: [{status}] {step.tool_name}")
 
-    await run_orchestrator(steps, browser_session, llm, TOOLS_DIR)
-    print("[main] Task completa.")
+    try:
+        await run_orchestrator(steps, browser_session, llm, TOOLS_DIR)
+        print("[main] Task completa.")
+    finally:
+        await browser_session.stop()
 
 
 if __name__ == '__main__':
