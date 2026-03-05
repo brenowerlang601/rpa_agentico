@@ -31,58 +31,53 @@ def _slug(text: str) -> str:
     return text.strip("_")
 
 
-def group_steps(raw_steps: list[dict]) -> list[dict]:
+def _base_url(url: str) -> str:
+    """Retorna URL sem fragment (#...) para comparar mudança de página."""
+    return url.split("#")[0]
+
+
+def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
     """
-    Agrupa ações brutas em steps semânticos.
-    Regras:
-    - navigation  → step próprio
-    - click + input (mesmo xpath) → step de preenchimento (usa só o input)
-    - click sem input subsequente → step de clique
-    - scroll → ignorado (não gera step, é comportamento implícito)
-    - key_press → ignorado (capturado junto com input quando relevante)
+    Primeira passagem: normaliza ações brutas.
+    - Mescla click+input no mesmo xpath em um único 'fill'
+    - Remove scroll e key_press isolados
+    - Mantém navigation, click (sem input subsequente) e fill
     """
-    steps = []
+    actions = []
     i = 0
     while i < len(raw_steps):
         action = raw_steps[i]
         atype = action.get("type")
 
+        if atype in ("scroll", "key_press"):
+            i += 1
+            continue
+
         if atype == "navigation":
-            steps.append({
-                "type": "navigation",
-                "url": action.get("url", ""),
-            })
+            actions.append({"type": "navigation", "url": action.get("url", "")})
             i += 1
+            continue
 
-        elif atype == "scroll":
-            # ignorado como step independente
-            i += 1
-
-        elif atype == "key_press":
-            # ignorado como step independente
-            i += 1
-
-        elif atype == "click":
+        if atype == "click":
             xpath = action.get("xpath", "")
             target = action.get("targetText", "").strip()
-            # Verifica se o próximo não-scroll/não-keypress é um input no mesmo xpath
+            # Pula scroll/key_press para ver se vem input no mesmo xpath
             j = i + 1
             while j < len(raw_steps) and raw_steps[j].get("type") in ("scroll", "key_press"):
                 j += 1
-
             if j < len(raw_steps) and raw_steps[j].get("type") == "input" and raw_steps[j].get("xpath") == xpath:
-                input_action = raw_steps[j]
-                steps.append({
+                inp = raw_steps[j]
+                actions.append({
                     "type": "fill",
                     "xpath": xpath,
-                    "css_selector": input_action.get("cssSelector") or action.get("cssSelector", ""),
-                    "target_text": target or input_action.get("targetText", "").strip(),
-                    "value": input_action.get("value", ""),
+                    "css_selector": inp.get("cssSelector") or action.get("cssSelector", ""),
+                    "target_text": target or inp.get("targetText", "").strip(),
+                    "value": inp.get("value", ""),
                     "url": action.get("url", ""),
                 })
                 i = j + 1
             else:
-                steps.append({
+                actions.append({
                     "type": "click",
                     "xpath": xpath,
                     "css_selector": action.get("cssSelector", ""),
@@ -90,10 +85,10 @@ def group_steps(raw_steps: list[dict]) -> list[dict]:
                     "url": action.get("url", ""),
                 })
                 i += 1
+            continue
 
-        elif atype == "input":
-            # input sem click anterior (raro) — trata direto
-            steps.append({
+        if atype == "input":
+            actions.append({
                 "type": "fill",
                 "xpath": action.get("xpath", ""),
                 "css_selector": action.get("cssSelector", ""),
@@ -102,46 +97,119 @@ def group_steps(raw_steps: list[dict]) -> list[dict]:
                 "url": action.get("url", ""),
             })
             i += 1
+            continue
 
+        i += 1
+
+    return actions
+
+
+def group_into_micro_processes(actions: list[dict]) -> list[dict]:
+    """
+    Segunda passagem: agrupa ações normalizadas em micro-processos.
+
+    Critério de quebra de grupo:
+    - Mudança de URL base (nova página) → novo grupo
+    - Após um clique que submete/confirma (botão sem input subsequente na mesma URL)
+      seguido de ações em URL diferente → quebra
+
+    Cada grupo vira uma tool com todas as suas ações internas.
+    """
+    if not actions:
+        return []
+
+    groups: list[dict] = []
+    current_actions: list[dict] = []
+    current_url = _base_url(actions[0].get("url", ""))
+
+    for action in actions:
+        action_url = _base_url(action.get("url", ""))
+
+        # Mudança de página: fecha grupo atual, abre novo
+        if action_url != current_url and current_actions:
+            groups.append({"url": current_url, "actions": current_actions})
+            current_actions = []
+            current_url = action_url
+
+        current_actions.append(action)
+
+    if current_actions:
+        groups.append({"url": current_url, "actions": current_actions})
+
+    return groups
+
+
+def name_groups(groups: list[dict]) -> list[dict]:
+    """
+    Atribui tool_name semântico a cada grupo (micro-processo).
+
+    Heurística:
+    - Grupo com fills de usuário/senha/login → "fazer_login_<pagina>"
+    - Grupo com vários fills → "preencher_formulario_<pagina>"
+    - Grupo com navigation + fills → inclui contexto da página
+    - Grupo só com clicks → "executar_acoes_<pagina>"
+    - Grupos com nome de página identificável usam o slug da página
+    """
+    from urllib.parse import urlparse
+
+    named = []
+    name_counts: dict[str, int] = {}
+
+    LOGIN_KEYWORDS = {"usuario", "senha", "login", "password", "user", "email", "pass"}
+
+    for group in groups:
+        url = group["url"]
+        actions = group["actions"]
+
+        # Nome base da página a partir da URL
+        path = urlparse(url).path
+        page_slug = _slug(path.split("/")[-1].split(".")[0]) or "pagina"
+
+        # Classifica o grupo pelo conteúdo das ações
+        fills = [a for a in actions if a["type"] == "fill"]
+        clicks = [a for a in actions if a["type"] == "click"]
+        navigations = [a for a in actions if a["type"] == "navigation"]
+
+        fill_targets = {_slug(f.get("target_text", "")) for f in fills}
+        is_login = bool(fill_targets & LOGIN_KEYWORDS) or any(
+            kw in page_slug for kw in ("login", "senha", "auth", "acesso")
+        )
+
+        if is_login:
+            base = f"fazer_login_{page_slug}"
+        elif fills and not clicks:
+            base = f"preencher_{page_slug}"
+        elif fills and clicks:
+            base = f"preencher_e_confirmar_{page_slug}"
+        elif clicks and not fills and not navigations:
+            label = _slug(clicks[-1].get("target_text", "")) or "acao"
+            base = f"clicar_{label}_{page_slug}"
+        elif navigations and not fills and not clicks:
+            base = f"navegar_{page_slug}"
         else:
-            i += 1
+            base = f"executar_{page_slug}"
 
-    return steps
+        count = name_counts.get(base, 0) + 1
+        name_counts[base] = count
+        tool_name = base if count == 1 else f"{base}_{count}"
+
+        named.append({
+            "tool_name": tool_name,
+            "url": url,
+            "actions": actions,
+        })
+
+    return named
+
+
+# Mantém compatibilidade com o restante do código
+def group_steps(raw_steps: list[dict]) -> list[dict]:
+    actions = _normalize_actions(raw_steps)
+    return group_into_micro_processes(actions)
 
 
 def name_steps(grouped: list[dict]) -> list[dict]:
-    """Atribui tool_name a cada step semântico."""
-    named = []
-    field_counts: dict[str, int] = {}
-
-    for step in grouped:
-        stype = step["type"]
-
-        if stype == "navigation":
-            from urllib.parse import urlparse
-            path = urlparse(step["url"]).path
-            slug = _slug(path.split("/")[-1].split(".")[0]) or "pagina"
-            name = f"navegar_{slug}"
-
-        elif stype == "fill":
-            target = step.get("target_text", "")
-            slug = _slug(target) if target else "campo"
-            base = f"preencher_{slug}"
-            count = field_counts.get(base, 0) + 1
-            field_counts[base] = count
-            name = base if count == 1 else f"{base}_{count}"
-
-        elif stype == "click":
-            target = step.get("target_text", "")
-            slug = _slug(target) if target else "elemento"
-            name = f"clicar_{slug}"
-
-        else:
-            name = f"acao_{stype}"
-
-        named.append({**step, "tool_name": name})
-
-    return named
+    return name_groups(grouped)
 
 
 # ---------------------------------------------------------------------------
@@ -169,37 +237,52 @@ def _locator_expr(step: dict) -> str:
     return 'page.locator("body")'
 
 
-def generate_tool_function(step: dict) -> str:
-    """Gera uma função async Playwright para um único step."""
-    name = step["tool_name"]
-    stype = step["type"]
+def _action_lines(action: dict) -> list[str]:
+    """Gera as linhas de código Playwright para uma ação individual."""
+    atype = action["type"]
+    lines = []
 
-    lines = [
-        f"async def {name}(page):",
-    ]
-
-    if stype == "navigation":
-        url = step["url"]
+    if atype == "navigation":
+        url = action["url"]
         lines += [
             f'    await page.goto({url!r})',
             "    await page.wait_for_load_state('networkidle')",
         ]
 
-    elif stype == "fill":
-        locator = _locator_expr(step)
-        value = step.get("value", "")
+    elif atype == "fill":
+        locator = _locator_expr(action)
+        value = action.get("value", "")
         lines += [
             f'    await {locator}.click()',
             f'    await {locator}.fill({value!r})',
         ]
 
-    elif stype == "click":
-        locator = _locator_expr(step)
+    elif atype == "click":
+        locator = _locator_expr(action)
         lines += [
             f'    await {locator}.click()',
+            "    await page.wait_for_timeout(500)",
         ]
 
-    lines.append("    await page.wait_for_timeout(500)")
+    return lines
+
+
+def generate_tool_function(group: dict) -> str:
+    """Gera uma função async Playwright para um micro-processo (grupo de ações)."""
+    name = group["tool_name"]
+    actions = group["actions"]
+
+    lines = [f"async def {name}(page):"]
+
+    for action in actions:
+        action_lines = _action_lines(action)
+        lines.extend(action_lines)
+
+    # Adiciona wait final apenas se o último action não termina com um timeout
+    last_action = actions[-1] if actions else None
+    if not last_action or last_action.get("type") != "click":
+        lines.append("    await page.wait_for_timeout(500)")
+
     lines.append("")
     return "\n".join(lines)
 
@@ -294,9 +377,10 @@ def process_json(json_path: Path) -> None:
     grouped = group_steps(raw_steps)
     named = name_steps(grouped)
 
-    print(f"  Steps semanticos identificados: {len(named)}")
+    print(f"  Micro-processos identificados: {len(named)}")
     for s in named:
-        print(f"    - [{s['type']}] {s['tool_name']}")
+        n_actions = len(s["actions"])
+        print(f"    - {s['tool_name']}  ({n_actions} acoes)")
 
     existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
     save_tools(named, TOOLS_DIR, existing)
