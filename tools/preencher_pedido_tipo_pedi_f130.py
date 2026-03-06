@@ -1,5 +1,5 @@
 import asyncio
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 
 async def safe_click(page, xpath, fallback_attr=None):
@@ -19,7 +19,6 @@ async def safe_click(page, xpath, fallback_attr=None):
                 return
             except Exception:
                 continue
-    # As último recurso, ignorar erro
     try:
         await locator.click(force=True)
     except Exception:
@@ -54,88 +53,80 @@ async def safe_fill(page, xpath, text, clear=False, fallback_attr=None):
                 return
             except Exception:
                 continue
-    # Último recurso: tentar novamente sem tratamento
     try:
         await locator.fill(text)
     except Exception:
         pass
 
 
-async def run():
-    async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp('http://localhost:9222')
-        page = browser.contexts[0].pages[0]
+async def preencher_pedido_tipo_pedi_f130(page: Page) -> bool:
+    """Executa o passo 'preencher_pedido_tipo_pedi_f130'. Retorna True se todas as ações tiveram sucesso."""
+    errors: list[tuple[str, str]] = []
 
-        # A tela já está carregada segundo a descrição; não há ações de navegação no histórico.
-
-        # 1) click input index 91 - xpath 'html/body/div[1]/div[5]/form/div[3]/input'
+    try:
         await safe_click(
             page,
             "html/body/div[1]/div[5]/form/div[3]/input",
-            fallback_attr=[
-                "input[name='tecido_peca.']",
-                "input.textfield"
-            ]
+            fallback_attr=["input[name='tecido_peca.']", "input.textfield"]
         )
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_1_click_tecido_peca', str(e)))
 
-        # 2) input '1' clear=True no mesmo campo index 91
+    try:
         await safe_fill(
             page,
             "html/body/div[1]/div[5]/form/div[3]/input",
             "1",
             clear=True,
-            fallback_attr=[
-                "input[name='tecido_peca.']",
-                "input.textfield"
-            ]
+            fallback_attr=["input[name='tecido_peca.']", "input.textfield"]
         )
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_2_fill_tecido_peca', str(e)))
 
-        # 3) click input index 96 - xpath 'html/body/div[1]/div[5]/form/div[10]/input'
+    try:
         await safe_click(
             page,
             "html/body/div[1]/div[5]/form/div[10]/input",
-            fallback_attr=[
-                "input[name='tipo_pedido.']",
-                "input.textfield"
-            ]
+            fallback_attr=["input[name='tipo_pedido.']", "input.textfield"]
         )
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_3_click_tipo_pedido', str(e)))
 
-        # 4) input '1' clear=True no campo index 96
+    try:
         await safe_fill(
             page,
             "html/body/div[1]/div[5]/form/div[10]/input",
             "1",
             clear=True,
-            fallback_attr=[
-                "input[name='tipo_pedido.']",
-                "input.textfield"
-            ]
+            fallback_attr=["input[name='tipo_pedido.']", "input.textfield"]
         )
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_4_fill_tipo_pedido', str(e)))
 
-        # 5) send_keys "Tab"
-        try:
-            await page.keyboard.press("Tab")
-        except Exception:
-            pass
+    try:
+        await page.keyboard.press("Tab")
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_5_key_tab', str(e)))
 
-        # 6) click input index 102 - xpath 'html/body/div[1]/div[5]/form/div[26]/input'
+    try:
         await safe_click(
             page,
             "html/body/div[1]/div[5]/form/div[26]/input",
-            fallback_attr=[
-                "input[name='pedido_venda.']",
-                "input.textfield"
-            ]
+            fallback_attr=["input[name='pedido_venda.']", "input.textfield"]
         )
         await asyncio.sleep(0.5)
+    except Exception as e:
+        errors.append(('acao_6_click_pedido_venda', str(e)))
 
-        # Ação "done" é apenas descritiva, não gera interação no script.
-
-
-if __name__ == '__main__':
-    asyncio.run(run())
+    if errors:
+        print(f"[FAIL] preencher_pedido_tipo_pedi_f130: {len(errors)} erro(s)")
+        for label, msg in errors:
+            print(f"  - {label}: {msg}")
+        return False
+    print(f"[OK] preencher_pedido_tipo_pedi_f130")
+    return True

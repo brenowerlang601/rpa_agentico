@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>RPA Workflow Editor</title>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/dracula.css" />
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* HEADER */
+    header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 0 20px; height: 56px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    header h1 { font-size: 16px; font-weight: 600; color: #a78bfa; letter-spacing: .5px; }
+    .header-sep { flex: 1; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: #7c3aed; color: #fff; }
+    .btn-success { background: #059669; color: #fff; }
+    .btn-outline { background: transparent; color: #a0aec0; border: 1px solid #4a5568; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .workflow-name-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 220px; }
+
+    /* LAYOUT */
+    .workspace { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* TERMINAL */
+    .terminal-panel { background: #0a0c14; border-top: 1px solid #2d3748; flex-shrink: 0; display: flex; flex-direction: column; transition: height .2s; height: 0; overflow: hidden; }
+    .terminal-panel.open { height: 220px; }
+    .terminal-header { padding: 6px 14px; border-bottom: 1px solid #1a1d2e; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .terminal-header span { font-size: 11px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; flex: 1; }
+    .terminal-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+    .terminal-status.running { background: #744210; color: #fbd38d; }
+    .terminal-status.ok { background: #1c4532; color: #6ee7b7; }
+    .terminal-status.fail { background: #63171b; color: #fc8181; }
+    .terminal-output { flex: 1; overflow-y: auto; padding: 8px 14px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
+    .terminal-output .line { white-space: pre-wrap; word-break: break-all; }
+    .terminal-output .line.ok { color: #6ee7b7; }
+    .terminal-output .line.fail { color: #fc8181; }
+    .terminal-output .line.sep { color: #4a5568; }
+    .terminal-output .line.dim { color: #718096; }
+    .btn-run { background: #d97706; color: #fff; }
+    .btn-run:hover { background: #b45309; opacity: 1; }
+    .btn-run.running { background: #4a5568; cursor: not-allowed; }
+
+    /* SIDEBAR — biblioteca de tools */
+    .sidebar { width: 260px; background: #141622; border-right: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
+    .sidebar-header { padding: 14px 16px; font-size: 12px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; border-bottom: 1px solid #2d3748; }
+    .tool-library { flex: 1; overflow-y: auto; padding: 8px; }
+    .tool-card { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: grab; display: flex; align-items: center; gap: 8px; transition: border-color .15s, background .15s; user-select: none; }
+    .tool-card:hover { border-color: #7c3aed; background: #252840; }
+    .tool-card .grip { color: #4a5568; font-size: 14px; }
+    .tool-card .tool-name { font-size: 13px; color: #e2e8f0; word-break: break-all; }
+    .tool-card .edit-btn { margin-left: auto; color: #718096; background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+    .tool-card .edit-btn:hover { color: #a78bfa; background: #2d3748; }
+
+    /* CANVAS — fluxo atual */
+    .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .canvas-header { padding: 12px 16px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #718096; }
+    .canvas { flex: 1; overflow-y: auto; padding: 12px 16px; }
+    .drop-zone { min-height: 120px; border: 2px dashed #2d3748; border-radius: 10px; padding: 8px; transition: border-color .2s; }
+    .drop-zone.drag-over { border-color: #7c3aed; background: #1a1a2e; }
+    .flow-block { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; }
+    .flow-block:hover { border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed22; }
+    .flow-block.sortable-ghost { opacity: .4; }
+    .flow-block .step-num { font-size: 11px; color: #4a5568; min-width: 22px; text-align: center; background: #0f1117; border-radius: 4px; padding: 2px 4px; }
+    .flow-block .step-name { font-size: 13px; flex: 1; }
+    .flow-block .block-actions { display: flex; gap: 6px; }
+    .flow-block .block-btn { background: none; border: none; color: #4a5568; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+    .flow-block .block-btn:hover { color: #a78bfa; background: #2d3748; }
+    .flow-block .block-btn.remove:hover { color: #fc8181; }
+    .empty-hint { text-align: center; color: #4a5568; font-size: 13px; padding: 40px 20px; }
+
+    /* PREVIEW */
+    .preview-panel { width: 380px; background: #141622; border-left: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
+    .preview-header { padding: 14px 16px; font-size: 12px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; }
+    .preview-header span { flex: 1; }
+    .preview-code { flex: 1; overflow: auto; }
+    .preview-code .CodeMirror { height: 100%; font-size: 12px; background: #141622; }
+
+    /* MODAL — editor de tool */
+    .modal-overlay { position: fixed; inset: 0; background: #00000099; display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal-overlay.hidden { display: none; }
+    .modal { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 12px; width: 760px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; }
+    .modal-title { font-size: 15px; font-weight: 600; flex: 1; }
+    .modal-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-body .CodeMirror { height: 480px; font-size: 13px; }
+    .modal-footer { padding: 12px 20px; border-top: 1px solid #2d3748; display: flex; justify-content: flex-end; gap: 8px; }
+
+    /* UPLOAD */
+    .upload-area { border: 2px dashed #4a5568; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .2s; margin: 8px; }
+    .upload-area:hover, .upload-area.dragover { border-color: #7c3aed; }
+    .upload-area input { display: none; }
+    .upload-area p { font-size: 13px; color: #718096; margin-top: 6px; }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #1a1d2e; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 16px; font-size: 13px; z-index: 200; opacity: 0; transition: opacity .3s; pointer-events: none; }
+    #toast.show { opacity: 1; }
+    #toast.ok { border-color: #059669; color: #6ee7b7; }
+    #toast.err { border-color: #e53e3e; color: #fc8181; }
+
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RPA Workflow Editor</h1>
+  <input class="workflow-name-input" id="workflowName" type="text" placeholder="Nome do workflow..." value="Novo Workflow" />
+  <div class="header-sep"></div>
+  <button class="btn btn-outline btn-sm" onclick="loadWorkflow()">Carregar fluxo...</button>
+  <button class="btn btn-success" onclick="saveWorkflow()">Salvar script</button>
+  <button class="btn btn-run" id="runBtn" onclick="runWorkflow()">&#9654; Executar</button>
+</header>
+
+<div class="workspace">
+<div class="main">
+
+  <!-- SIDEBAR: biblioteca de tools -->
+  <aside class="sidebar">
+    <div class="sidebar-header">Tools disponíveis</div>
+
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+      <div style="font-size:24px; color:#7c3aed;">+</div>
+      <p>Arraste um JSON ou clique para importar</p>
+      <input type="file" id="fileInput" accept=".json" onchange="uploadJson(this)" />
+    </div>
+
+    <div class="tool-library" id="toolLibrary"></div>
+  </aside>
+
+  <!-- CANVAS: fluxo atual -->
+  <div class="canvas-area">
+    <div class="canvas-header">
+      <span>Sequência do fluxo — arraste tools da biblioteca ou reordene</span>
+    </div>
+    <div class="canvas">
+      <div class="drop-zone" id="dropZone">
+        <div class="empty-hint" id="emptyHint">Nenhuma tool no fluxo. Arraste da biblioteca ou importe um JSON.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PREVIEW: script gerado -->
+  <div class="preview-panel">
+    <div class="preview-header">
+      <span>Preview do script</span>
+    </div>
+    <div class="preview-code" id="previewContainer"></div>
+  </div>
+
+</div>
+
+<!-- TERMINAL -->
+<div class="terminal-panel" id="terminalPanel">
+  <div class="terminal-header">
+    <span>Output de execução</span>
+    <span class="terminal-status" id="terminalStatus" style="display:none"></span>
+    <button class="btn btn-outline btn-sm" onclick="clearTerminal()">Limpar</button>
+    <button class="btn btn-outline btn-sm" onclick="closeTerminal()">&#10005;</button>
+  </div>
+  <div class="terminal-output" id="terminalOutput"></div>
+</div>
+
+</div><!-- /.workspace -->
+
+<!-- MODAL: editor de código da tool -->
+<div class="modal-overlay hidden" id="editorModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Editando tool</span>
+      <button class="btn btn-outline btn-sm" onclick="closeModal()">Fechar</button>
+    </div>
+    <div class="modal-body" id="editorContainer"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveTool()">Salvar tool</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: carregar fluxo existente -->
+<div class="modal-overlay hidden" id="loadModal">
+  <div class="modal" style="width:480px;">
+    <div class="modal-header">
+      <span class="modal-title">Carregar fluxo existente</span>
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('loadModal').classList.add('hidden')">Fechar</button>
+    </div>
+    <div class="modal-body" style="padding:16px; overflow-y:auto; max-height:400px;">
+      <div id="workflowList"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── Estado global ───────────────────────────────────────────────────────────
+let allTools = [];        // [{name, code}]
+let flowSteps = [];       // [toolName, ...]
+let currentEditTool = null;
+let editorCM = null;      // CodeMirror editor do modal
+let previewCM = null;     // CodeMirror do preview
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initPreview();
+  loadTools();
+  initDropZone();
+  initUploadDrag();
+});
+
+// ─── Preview CodeMirror ───────────────────────────────────────────────────────
+function initPreview() {
+  previewCM = CodeMirror(document.getElementById('previewContainer'), {
+    mode: 'python', theme: 'dracula', lineNumbers: true,
+    readOnly: true, lineWrapping: false,
+  });
+}
+
+// ─── Carregar tools da API ────────────────────────────────────────────────────
+function loadTools() {
+  fetch('/api/tools').then(r => r.json()).then(tools => {
+    allTools = tools;
+    renderLibrary();
+  });
+}
+
+function renderLibrary() {
+  const lib = document.getElementById('toolLibrary');
+  lib.innerHTML = '';
+  allTools.forEach(tool => {
+    const card = document.createElement('div');
+    card.className = 'tool-card';
+    card.dataset.tool = tool.name;
+    card.innerHTML = `
+      <span class="grip">⠿</span>
+      <span class="tool-name">${tool.name}</span>
+      <button class="edit-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">✎</button>
+    `;
+    card.addEventListener('dblclick', () => addToFlow(tool.name));
+    lib.appendChild(card);
+  });
+  initLibrarySortable();
+}
+
+// ─── Drag-and-drop: biblioteca → canvas ──────────────────────────────────────
+function initLibrarySortable() {
+  Sortable.create(document.getElementById('toolLibrary'), {
+    group: { name: 'tools', pull: 'clone', put: false },
+    sort: false,
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+  });
+}
+
+function initDropZone() {
+  const zone = document.getElementById('dropZone');
+  Sortable.create(zone, {
+    group: { name: 'tools', pull: false, put: true },
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    onAdd(evt) {
+      // Item arrastado da biblioteca para o canvas
+      const toolName = evt.item.dataset.tool;
+      evt.item.remove(); // remove o clone do sortable, vamos renderizar nós mesmos
+      const insertIdx = evt.newIndex;
+      flowSteps.splice(insertIdx, 0, toolName);
+      renderFlow();
+      refreshPreview();
+    },
+    onUpdate() {
+      // Reordenação dentro do canvas — sincroniza flowSteps pela ordem DOM
+      syncFlowFromDOM();
+      refreshPreview();
+    },
+  });
+}
+
+function syncFlowFromDOM() {
+  const blocks = document.querySelectorAll('#dropZone .flow-block');
+  flowSteps = Array.from(blocks).map(b => b.dataset.tool);
+}
+
+// ─── Render do fluxo ─────────────────────────────────────────────────────────
+function renderFlow() {
+  const zone = document.getElementById('dropZone');
+  const hint = document.getElementById('emptyHint');
+  // Limpa blocos mas mantém o hint
+  zone.querySelectorAll('.flow-block').forEach(b => b.remove());
+
+  if (flowSteps.length === 0) {
+    hint.style.display = '';
+    return;
+  }
+  hint.style.display = 'none';
+
+  flowSteps.forEach((name, idx) => {
+    const block = document.createElement('div');
+    block.className = 'flow-block';
+    block.dataset.tool = name;
+    block.innerHTML = `
+      <span class="step-num">${idx + 1}</span>
+      <span class="step-name">${name}</span>
+      <div class="block-actions">
+        <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)">✎</button>
+        <button class="block-btn remove" title="Remover" onclick="removeStep(${idx})">✕</button>
+      </div>
+    `;
+    zone.appendChild(block);
+  });
+
+  // Reinicializa o sortable no canvas para permitir reordenação
+  initDropZone();
+}
+
+function addToFlow(toolName) {
+  flowSteps.push(toolName);
+  renderFlow();
+  refreshPreview();
+}
+
+function removeStep(idx) {
+  flowSteps.splice(idx, 1);
+  renderFlow();
+  refreshPreview();
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+function refreshPreview() {
+  const name = document.getElementById('workflowName').value || 'workflow';
+  fetch('/api/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps }),
+  }).then(r => r.json()).then(data => {
+    previewCM.setValue(data.script);
+  });
+}
+
+document.getElementById('workflowName').addEventListener('input', refreshPreview);
+
+// ─── Editor de tool ──────────────────────────────────────────────────────────
+function openEditor(toolName, evt) {
+  if (evt) evt.stopPropagation();
+  currentEditTool = toolName;
+  document.getElementById('modalTitle').textContent = `Editando: ${toolName}.py`;
+
+  fetch(`/api/tool/${toolName}`).then(r => r.json()).then(data => {
+    document.getElementById('editorModal').classList.remove('hidden');
+    const container = document.getElementById('editorContainer');
+    container.innerHTML = '';
+    editorCM = CodeMirror(container, {
+      value: data.code,
+      mode: 'python',
+      theme: 'dracula',
+      lineNumbers: true,
+      indentUnit: 4,
+      tabSize: 4,
+      indentWithTabs: false,
+      lineWrapping: false,
+      extraKeys: { Tab: cm => cm.replaceSelection('    ') },
+    });
+    setTimeout(() => editorCM.refresh(), 50);
+  });
+}
+
+function closeModal() {
+  document.getElementById('editorModal').classList.add('hidden');
+  editorCM = null;
+  currentEditTool = null;
+}
+
+function saveTool() {
+  if (!editorCM || !currentEditTool) return;
+  const code = editorCM.getValue();
+  fetch(`/api/tool/${currentEditTool}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  }).then(r => r.json()).then(() => {
+    toast('Tool salva com sucesso!', 'ok');
+    // Atualiza o cache local
+    const t = allTools.find(t => t.name === currentEditTool);
+    if (t) t.code = code;
+    closeModal();
+  });
+}
+
+// ─── Upload de JSON ──────────────────────────────────────────────────────────
+function uploadJson(input) {
+  const file = input.files[0];
+  if (!file) return;
+  doUpload(file);
+  input.value = '';
+}
+
+function doUpload(file) {
+  const form = new FormData();
+  form.append('file', file);
+  toast('Processando JSON...', 'ok');
+  fetch('/api/upload', { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { toast(data.error, 'err'); return; }
+      allTools = data.tools;
+      renderLibrary();
+      // Carrega o fluxo recém-gerado automaticamente
+      document.getElementById('workflowName').value = data.workflow_name;
+      flowSteps = data.steps;
+      renderFlow();
+      refreshPreview();
+      toast(`Importado: ${data.steps.length} steps gerados`, 'ok');
+    })
+    .catch(() => toast('Erro ao processar o arquivo', 'err'));
+}
+
+// Drag-and-drop de arquivo na área de upload
+function initUploadDrag() {
+  const area = document.getElementById('uploadArea');
+  area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
+  area.addEventListener('dragleave', () => area.classList.remove('dragover'));
+  area.addEventListener('drop', e => {
+    e.preventDefault();
+    area.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.json')) doUpload(file);
+  });
+}
+
+// ─── Carregar fluxo existente ─────────────────────────────────────────────────
+function loadWorkflow() {
+  fetch('/api/workflows').then(r => r.json()).then(workflows => {
+    const list = document.getElementById('workflowList');
+    if (workflows.length === 0) {
+      list.innerHTML = '<p style="color:#718096; font-size:13px;">Nenhum fluxo salvo.</p>';
+    } else {
+      list.innerHTML = workflows.map(w => `
+        <div style="background:#1e2235; border:1px solid #2d3748; border-radius:8px; padding:12px; margin-bottom:8px; cursor:pointer;"
+             onclick="selectWorkflow('${w.name}', ${JSON.stringify(w.steps).replace(/"/g, '&quot;')}, '${w.name}')">
+          <div style="font-size:14px; font-weight:500;">${w.name}</div>
+          <div style="font-size:12px; color:#718096; margin-top:4px;">${w.steps.length} step(s): ${w.steps.join(' → ')}</div>
+        </div>
+      `).join('');
+    }
+    document.getElementById('loadModal').classList.remove('hidden');
+  });
+}
+
+function selectWorkflow(slug, steps, name) {
+  document.getElementById('workflowName').value = name.replace(/_/g, ' ');
+  flowSteps = steps;
+  renderFlow();
+  refreshPreview();
+  document.getElementById('loadModal').classList.remove('hidden');
+  document.getElementById('loadModal').classList.add('hidden');
+}
+
+// ─── Salvar workflow ──────────────────────────────────────────────────────────
+function saveWorkflow() {
+  const name = document.getElementById('workflowName').value || 'workflow';
+  fetch('/api/save-workflow', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps }),
+  }).then(r => r.json()).then(data => {
+    toast(`Script salvo: tests/${data.file}`, 'ok');
+  });
+}
+
+// ─── Execução via SSE ─────────────────────────────────────────────────────────
+let activeSource = null;
+
+function runWorkflow() {
+  if (flowSteps.length === 0) { toast('Nenhum step no fluxo', 'err'); return; }
+
+  const runBtn = document.getElementById('runBtn');
+  if (runBtn.classList.contains('running')) return;
+
+  const name = document.getElementById('workflowName').value || 'workflow';
+
+  // Abre terminal
+  const panel = document.getElementById('terminalPanel');
+  const output = document.getElementById('terminalOutput');
+  const status = document.getElementById('terminalStatus');
+  panel.classList.add('open');
+  output.innerHTML = '';
+  status.style.display = 'inline';
+  status.className = 'terminal-status running';
+  status.textContent = 'Executando...';
+  runBtn.classList.add('running');
+  runBtn.textContent = '⏳ Executando';
+
+  appendLine(`Iniciando fluxo: ${name}`, 'dim');
+  appendLine('─'.repeat(44), 'sep');
+
+  // Cancela SSE anterior se houver
+  if (activeSource) { activeSource.close(); activeSource = null; }
+
+  // Inicia a execução via fetch + ReadableStream (SSE manual para suportar POST)
+  fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps }),
+  }).then(response => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    function read() {
+      reader.read().then(({ done, value }) => {
+        if (done) { finishRun(null); return; }
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop(); // mantém fragmento incompleto
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          const line = part.slice(6); // remove "data: "
+          if (line.startsWith('__EXIT__')) {
+            finishRun(parseInt(line.replace('__EXIT__', ''), 10));
+            return;
+          }
+          renderLine(line);
+        }
+        read();
+      });
+    }
+    read();
+  }).catch(e => {
+    appendLine(`[ERRO] ${e}`, 'fail');
+    finishRun(1);
+  });
+}
+
+function renderLine(line) {
+  if (line.startsWith('[OK]')) appendLine(line, 'ok');
+  else if (line.startsWith('[FAIL]') || line.startsWith('  - ')) appendLine(line, 'fail');
+  else if (line.startsWith('=') || line.startsWith('-')) appendLine(line, 'sep');
+  else if (line.startsWith('  [PASS]')) appendLine(line, 'ok');
+  else if (line.startsWith('  [FAIL]')) appendLine(line, 'fail');
+  else appendLine(line, '');
+}
+
+function appendLine(text, cls = '') {
+  const output = document.getElementById('terminalOutput');
+  const div = document.createElement('div');
+  div.className = `line ${cls}`;
+  div.textContent = text;
+  output.appendChild(div);
+  output.scrollTop = output.scrollHeight;
+}
+
+function finishRun(code) {
+  const runBtn = document.getElementById('runBtn');
+  const status = document.getElementById('terminalStatus');
+  runBtn.classList.remove('running');
+  runBtn.innerHTML = '&#9654; Executar';
+
+  if (code === null) return;
+  if (code === 0) {
+    status.className = 'terminal-status ok';
+    status.textContent = 'PASSOU';
+  } else {
+    status.className = 'terminal-status fail';
+    status.textContent = 'FALHOU';
+  }
+}
+
+function clearTerminal() {
+  document.getElementById('terminalOutput').innerHTML = '';
+  const status = document.getElementById('terminalStatus');
+  status.style.display = 'none';
+}
+
+function closeTerminal() {
+  document.getElementById('terminalPanel').classList.remove('open');
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  setTimeout(() => el.className = '', 3000);
+}
+</script>
+</body>
+</html>
