@@ -253,53 +253,86 @@ def _locator_expr(step: dict) -> str:
     return 'page.locator("body")'
 
 
-def _action_lines(action: dict) -> list[str]:
-    """Gera as linhas de código Playwright para uma ação individual."""
+def _action_block(action: dict, idx: int) -> list[str]:
+    """
+    Gera um bloco try/except para uma ação individual.
+    Em caso de erro, registra na lista `errors` e não interrompe o fluxo.
+    Retorna lista de linhas indentadas com 4 espaços (corpo da função).
+    """
     atype = action["type"]
+    label = f"acao_{idx + 1}_{atype}"
     lines = []
 
     if atype == "navigation":
         url = action["url"]
-        lines += [
-            f'    await page.goto({url!r})',
-            "    await page.wait_for_load_state('networkidle')",
+        body = [
+            f'        await page.goto({url!r})',
+            "        await page.wait_for_load_state('networkidle')",
         ]
 
     elif atype == "fill":
         locator = _locator_expr(action)
         value = action.get("value", "")
-        lines += [
-            f'    await {locator}.click()',
-            f'    await {locator}.fill({value!r})',
+        target = action.get("target_text", "") or action.get("xpath", "")
+        label = f"acao_{idx + 1}_fill_{_slug(target)[:30]}" if target else label
+        body = [
+            f'        await {locator}.click()',
+            f'        await {locator}.fill({value!r})',
         ]
 
     elif atype == "click":
         locator = _locator_expr(action)
-        lines += [
-            f'    await {locator}.click()',
-            "    await page.wait_for_timeout(500)",
+        target = action.get("target_text", "") or action.get("xpath", "")
+        label = f"acao_{idx + 1}_click_{_slug(target)[:30]}" if target else label
+        body = [
+            f'        await {locator}.click()',
+            "        await page.wait_for_timeout(500)",
         ]
 
+    else:
+        return []
+
+    lines += [
+        f'    try:',
+    ] + body + [
+        f'    except Exception as e:',
+        f'        errors.append(({label!r}, str(e)))',
+    ]
     return lines
 
 
 def generate_tool_function(group: dict) -> str:
-    """Gera uma função async Playwright para um micro-processo (grupo de ações)."""
+    """
+    Gera uma função async Playwright para um micro-processo.
+    Cada ação é envolta em try/except individual.
+    Retorna True se nenhum erro ocorreu, False caso contrário.
+    """
     name = group["tool_name"]
     actions = group["actions"]
 
-    lines = [f"async def {name}(page):"]
+    lines = [
+        f"async def {name}(page) -> bool:",
+        f'    """Executa o passo \'{name}\'. Retorna True se todas as ações tiveram sucesso."""',
+        "    errors: list[tuple[str, str]] = []",
+        "",
+    ]
 
-    for action in actions:
-        action_lines = _action_lines(action)
-        lines.extend(action_lines)
+    for idx, action in enumerate(actions):
+        block = _action_block(action, idx)
+        if block:
+            lines.extend(block)
+            lines.append("")
 
-    # Adiciona wait final apenas se o último action não termina com um timeout
-    last_action = actions[-1] if actions else None
-    if not last_action or last_action.get("type") != "click":
-        lines.append("    await page.wait_for_timeout(500)")
-
-    lines.append("")
+    lines += [
+        "    if errors:",
+        f'        print(f"[FAIL] {name}: {{len(errors)}} erro(s)")',
+        "        for label, msg in errors:",
+        '            print(f"  - {label}: {msg}")',
+        "        return False",
+        f'    print(f"[OK] {name}")',
+        "    return True",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -341,8 +374,10 @@ def save_test_script(workflow_name: str, named_steps: list[dict], tests_dir: Pat
         f"from tools.{fn} import {fn}" for fn in func_names
     )
 
-    # corpo do teste: chama cada função em sequência (8 espaços = dentro do async with)
-    indented_calls = "\n".join(f"        await {fn}(page)" for fn in func_names)
+    # corpo do teste: chama cada função e coleta resultado True/False
+    result_lines = "\n".join(
+        f"        results[{fn!r}] = await {fn}(page)" for fn in func_names
+    )
 
     script = f"""\
 import asyncio
@@ -361,9 +396,24 @@ async def run():
         browser = await p.chromium.connect_over_cdp('http://localhost:9222')
         page = browser.contexts[0].pages[0]
 
-{indented_calls}
+        results: dict[str, bool] = {{}}
 
-        print("Fluxo '{workflow_name}' concluido.")
+{result_lines}
+
+        print()
+        print("=" * 50)
+        print(f"Relatório QA — {workflow_name}")
+        print("=" * 50)
+        passed = [k for k, v in results.items() if v]
+        failed = [k for k, v in results.items() if not v]
+        for step in passed:
+            print(f"  [PASS] {{step}}")
+        for step in failed:
+            print(f"  [FAIL] {{step}}")
+        print("-" * 50)
+        print(f"  Total: {{len(results)}} | Passed: {{len(passed)}} | Failed: {{len(failed)}}")
+        print("=" * 50)
+        sys.exit(0 if not failed else 1)
 
 
 if __name__ == '__main__':

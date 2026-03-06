@@ -8,7 +8,7 @@ from playwright.async_api import async_playwright
 
 from tools.navegar_forms import navegar_forms
 from tools.fazer_login_forms import fazer_login_forms
-from tools.pesquisa_tela_pedi_f130 import pesquisa_tela_pedi_f130
+from tools.clicar_pedido_de_vendas_forms import clicar_pedido_de_vendas_forms
 from tools.preencher_forms import preencher_forms
 
 
@@ -17,12 +17,27 @@ async def run():
         browser = await p.chromium.connect_over_cdp('http://localhost:9222')
         page = browser.contexts[0].pages[0]
 
-        await navegar_forms(page)
-        await fazer_login_forms(page)
-        await pesquisa_tela_pedi_f130(page)
-        await preencher_forms(page)
+        results: dict[str, bool] = {}
 
-        print("Fluxo 'Recorded Workflow (Semantic)' concluido.")
+        results['navegar_forms'] = await navegar_forms(page)
+        results['fazer_login_forms'] = await fazer_login_forms(page)
+        results['clicar_pedido_de_vendas_forms'] = await clicar_pedido_de_vendas_forms(page)
+        results['preencher_forms'] = await preencher_forms(page)
+
+        print()
+        print("=" * 50)
+        print(f"Relatório QA — Recorded Workflow (Semantic)")
+        print("=" * 50)
+        passed = [k for k, v in results.items() if v]
+        failed = [k for k, v in results.items() if not v]
+        for step in passed:
+            print(f"  [PASS] {step}")
+        for step in failed:
+            print(f"  [FAIL] {step}")
+        print("-" * 50)
+        print(f"  Total: {len(results)} | Passed: {len(passed)} | Failed: {len(failed)}")
+        print("=" * 50)
+        sys.exit(0 if not failed else 1)
 
 
 if __name__ == '__main__':
