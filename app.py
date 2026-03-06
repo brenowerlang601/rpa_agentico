@@ -18,7 +18,6 @@ from json_processor import (
     TESTS_DIR,
     TOOLS_DIR,
     _slug,
-    generate_tool_function,
     group_steps,
     name_steps,
     process_json,
@@ -156,18 +155,23 @@ def api_upload():
     dest = JSON_RPA_DIR / f.filename
     f.save(dest)
 
-    try:
-        process_json(dest)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    # Retorna os steps gerados para o workflow
+    # Calcula os steps imediatamente (sem LLM)
     data = json.loads(dest.read_text(encoding="utf-8"))
     workflow_name = data.get("name", dest.stem)
     raw_steps = data.get("steps", [])
     grouped = group_steps(raw_steps)
     named = name_steps(grouped)
     steps = [s["tool_name"] for s in named]
+
+    # Gera as tools em background para não bloquear o browser
+    def _generate_tools():
+        try:
+            process_json(dest)
+        except Exception as e:
+            print(f"[upload] Erro ao gerar tools: {e}")
+
+    t = threading.Thread(target=_generate_tools, daemon=True)
+    t.start()
 
     return jsonify({
         "workflow_name": workflow_name,

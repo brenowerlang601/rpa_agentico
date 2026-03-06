@@ -1,68 +1,121 @@
+"""
+Gera scripts Playwright para tools RPA.
+
+Dois modos de entrada:
+1. Ações ao vivo (browser_use) — via generate_tool_from_agent_result()
+2. Ações normalizadas do JSON — via generate_tool_from_actions()
+
+Em ambos os casos, um LLM Anthropic lê TODAS as ações e gera o código
+Python, garantindo que nenhum passo seja omitido.
+"""
+
 import json
+import os
 from pathlib import Path
 
-from openai import AsyncOpenAI
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
 
 TOOLS_DIR = Path("tools")
 TOOLS_DIR.mkdir(exist_ok=True)
 
-PLAYWRIGHT_PROMPT = """Você recebeu o histórico de ações de um agente de automação web.
-Gere um script Python standalone usando Playwright (async) que replique exatamente estas ações.
+# ---------------------------------------------------------------------------
+# Prompt para geração do código Playwright
+# ---------------------------------------------------------------------------
 
-Regras:
-- Use `from playwright.async_api import async_playwright`
-- Conecte ao browser via CDP: `await p.chromium.connect_over_cdp('http://localhost:9222')`
-- Obtenha a página ativa: `page = browser.contexts[0].pages[0]`
-- Para navigate: use `await page.goto(url)` seguido de `await page.wait_for_load_state('networkidle')`
-- Para click_element: use o x_path do interacted_element -> `await page.locator('xpath=//XPATH').click()`
-  - Converta o x_path de formato `html/body/div[1]/...` para XPath absoluto `//html/body/div[1]/...`
-- Para input_text: use `await page.locator('xpath=//XPATH').fill('text')`
-  - Se clear=True, limpe antes: `await page.locator('xpath=//XPATH').clear()`
-- Para scroll: use `await page.mouse.wheel(0, 300)` para baixo ou `await page.mouse.wheel(0, -300)` para cima
-- Adicione `await asyncio.sleep(0.5)` entre cada ação
-- Função principal: `async def run():`
-- Ao final: `if __name__ == '__main__': asyncio.run(run())`
+_PROMPT = """\
+Você é um especialista em automação web com Playwright (Python async).
+
+Gere uma função Python async chamada `{func_name}` que executa exatamente \
+a sequência de ações abaixo — SEM pular, reordenar ou omitir nenhuma delas.
+
+Regras obrigatórias:
+- Assinatura: `async def {func_name}(page) -> bool:`
+- Cada ação deve estar dentro de um bloco `try/except` individual
+- Em caso de erro em uma ação, adicione à lista `errors: list[tuple[str, str]]` e continue
+- Ao final: retorne `True` se `errors` estiver vazio, `False` caso contrário
+- Imprima `[OK] {func_name}` ou `[FAIL] {func_name}: N erro(s)` com detalhes
+- Conecte ao browser via CDP já estabelecida — `page` já está pronto, não crie browser
+- Para `navigation`: `await page.goto(url)` + `await page.wait_for_load_state('networkidle')`
+- Para `fill`: clique no locator + `await locator.fill(valor)` — use cssSelector se disponível, senão xpath
+- Para `click`: `await locator.click()` + `await page.wait_for_timeout(500)`
+- Para `key_press` com count=1: `await page.keyboard.press(key)` + `await page.wait_for_timeout(150)`
+- Para `key_press` com count>1: `for _ in range(count): await page.keyboard.press(key); await page.wait_for_timeout(150)`
+- Para xpath que começa sem `//`: adicione `//` no início
+- Para cssSelector: use diretamente como string no locator
 - NÃO inclua blocos markdown (```), apenas código Python puro
-- Use try/except para erros de elementos não encontrados com fallback por ax_name ou atributos
+- NÃO inclua imports — a função será importada em um arquivo que já tem os imports
+- Adicione um comentário inline em cada ação identificando o campo/elemento
 
-Histórico de ações (JSON):
+Ações a executar (JSON com TODOS os passos — nenhum pode ser omitido):
 {actions_json}
+
+Lembre: você deve gerar exatamente {n_actions} blocos try/except, um por ação.
 """
 
 
-async def generate_tool(task_name: str, result, llm) -> Path:
-    """
-    Gera um script Playwright a partir do histórico de ações do agente.
-
-    Args:
-        task_name: Nome da task (usado como nome do arquivo em tools/)
-        result: AgentHistoryList retornado por agent.run()
-        llm: Instância do LLM para gerar o script
-
-    Returns:
-        Path do arquivo gerado
-    """
-    actions = result.model_actions()
-    actions_json = json.dumps(actions, indent=2, default=str)
-
-    prompt = PLAYWRIGHT_PROMPT.format(actions_json=actions_json)
-
-    client = AsyncOpenAI()
-    response = await client.chat.completions.create(
-        model=str(llm.model),
-        messages=[{"role": "user", "content": prompt}],
+def _build_prompt(func_name: str, actions: list[dict]) -> str:
+    actions_json = json.dumps(actions, indent=2, ensure_ascii=False)
+    return _PROMPT.format(
+        func_name=func_name,
+        actions_json=actions_json,
+        n_actions=len(actions),
     )
 
-    script_code = response.choices[0].message.content.strip()
 
+def _call_llm(prompt: str) -> str:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        max_tokens=8192,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    code = response.choices[0].message.content.strip()
     # Remove markdown fences caso o LLM inclua
-    if script_code.startswith("```"):
-        lines = script_code.split('\n')
-        script_code = '\n'.join(lines[1:-1])
-        if script_code.endswith("```"):
-            script_code = script_code[:-3].rstrip()
+    if code.startswith("```"):
+        lines = code.split("\n")
+        code = "\n".join(lines[1:])
+        if code.endswith("```"):
+            code = code[:-3].rstrip()
+        elif "\n```" in code:
+            code = code[: code.rfind("\n```")]
+    return code
 
-    tool_path = TOOLS_DIR / f"{task_name}.py"
-    tool_path.write_text(script_code, encoding='utf-8')
-    print(f"[tool_generator] Script gerado e salvo em: {tool_path}")
+
+def _save_tool(func_name: str, func_code: str) -> Path:
+    header = "from playwright.async_api import Page\n\n"
+    tool_path = TOOLS_DIR / f"{func_name}.py"
+    tool_path.write_text(header + func_code, encoding="utf-8")
+    print(f"[tool_generator] Salvo: {tool_path}")
     return tool_path
+
+
+# ---------------------------------------------------------------------------
+# API pública
+# ---------------------------------------------------------------------------
+
+def generate_tool_from_actions(func_name: str, actions: list[dict]) -> Path:
+    """
+    Gera uma tool Playwright a partir de ações normalizadas do JSON.
+    O LLM recebe a lista completa e deve gerar um bloco por ação.
+    """
+    print(f"[tool_generator] Gerando '{func_name}' com {len(actions)} ações via LLM...")
+    prompt = _build_prompt(func_name, actions)
+    code = _call_llm(prompt)
+    return _save_tool(func_name, code)
+
+
+async def generate_tool_from_agent_result(task_name: str, result) -> Path:
+    """
+    Gera uma tool Playwright a partir do histórico de ações de um agente ao vivo.
+    Converte model_actions() para o formato de ações normalizadas e usa o mesmo LLM.
+    """
+    raw_actions = result.model_actions()
+    # Converte para formato genérico compatível com o prompt
+    actions = [{"type": "agent_action", "data": json.dumps(a, default=str)} for a in raw_actions]
+    print(f"[tool_generator] Gerando '{task_name}' de agent result ({len(actions)} ações) via LLM...")
+    prompt = _build_prompt(task_name, actions)
+    code = _call_llm(prompt)
+    return _save_tool(task_name, code)

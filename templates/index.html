@@ -403,21 +403,38 @@ function uploadJson(input) {
 function doUpload(file) {
   const form = new FormData();
   form.append('file', file);
-  toast('Processando JSON...', 'ok');
+  toast('Importando JSON...', 'ok');
   fetch('/api/upload', { method: 'POST', body: form })
     .then(r => r.json())
     .then(data => {
       if (data.error) { toast(data.error, 'err'); return; }
-      allTools = data.tools;
-      renderLibrary();
       // Carrega o fluxo recém-gerado automaticamente
       document.getElementById('workflowName').value = data.workflow_name;
       flowSteps = data.steps;
       renderFlow();
       refreshPreview();
-      toast(`Importado: ${data.steps.length} steps gerados`, 'ok');
+      toast(`${data.steps.length} steps identificados. Gerando tools em background...`, 'ok');
+      // Aguarda tools serem geradas e atualiza a biblioteca periodicamente
+      pollTools(data.steps, 0);
     })
     .catch(() => toast('Erro ao processar o arquivo', 'err'));
+}
+
+function pollTools(expectedSteps, attempts) {
+  if (attempts > 30) return; // para após ~5 min
+  setTimeout(() => {
+    fetch('/api/tools').then(r => r.json()).then(tools => {
+      allTools = tools;
+      renderLibrary();
+      const generated = tools.map(t => t.name);
+      const pending = expectedSteps.filter(s => !generated.includes(s));
+      if (pending.length === 0) {
+        toast('Todas as tools geradas com sucesso!', 'ok');
+      } else {
+        pollTools(expectedSteps, attempts + 1);
+      }
+    });
+  }, 10000); // verifica a cada 10s
 }
 
 // Drag-and-drop de arquivo na área de upload

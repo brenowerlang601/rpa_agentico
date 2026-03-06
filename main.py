@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 
-from json_processor import list_json_rpa, process_json
+from json_processor import list_json_rpa, _slug
+from orchestrator import run_from_json
 
 JSON_RPA_DIR = Path("json_rpa")
 
@@ -33,7 +34,7 @@ def main():
             print("Escolha inválida.")
             sys.exit(1)
 
-    process_json(selected)
+    run_from_json(selected)
 
 
 if __name__ == '__main__':

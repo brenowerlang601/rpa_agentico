@@ -44,12 +44,28 @@ def _screen_key(url: str) -> str:
     return parsed.scheme + "://" + parsed.netloc + parsed.path + "#" + frag
 
 
+def _normalize_key(raw_key: str) -> str:
+    """
+    Normaliza o nome da tecla do JSON para o formato aceito pelo Playwright.
+    Ex: 'CmdOrCtrl+V' → 'Control+v', 'Return' → 'Enter'
+    """
+    key = raw_key.strip()
+    # Atalhos compostos com CmdOrCtrl
+    if key.startswith("CmdOrCtrl+"):
+        letter = key.split("+", 1)[1]
+        return f"Control+{letter.lower()}"
+    # Aliases comuns
+    aliases = {"Return": "Enter", "Esc": "Escape", "Del": "Delete", "Ins": "Insert"}
+    return aliases.get(key, key)
+
+
 def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
     """
     Primeira passagem: normaliza ações brutas.
     - Mescla click+input no mesmo xpath em um único 'fill'
-    - Remove scroll e key_press isolados
-    - Mantém navigation, click (sem input subsequente) e fill
+    - Agrupa key_press consecutivos da mesma tecla em um único 'key_press' com count
+    - Remove scroll isolados
+    - Mantém navigation, click (sem input subsequente), fill e key_press
     """
     actions = []
     i = 0
@@ -57,8 +73,34 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
         action = raw_steps[i]
         atype = action.get("type")
 
-        if atype in ("scroll", "key_press"):
+        if atype == "scroll":
             i += 1
+            continue
+
+        if atype == "key_press":
+            key = _normalize_key(action.get("key", ""))
+            url = action.get("url", "")
+            xpath = action.get("xpath", "")
+            css = action.get("cssSelector", "")
+            # Agrupa repetições consecutivas da MESMA tecla NO MESMO ELEMENTO
+            # Se o xpath/cssSelector mudou, é uma ação independente (navegação entre campos)
+            count = 1
+            j = i + 1
+            while j < len(raw_steps):
+                nxt = raw_steps[j]
+                if nxt.get("type") != "key_press":
+                    break
+                if _normalize_key(nxt.get("key", "")) != key:
+                    break
+                nxt_xpath = nxt.get("xpath", "")
+                nxt_css = nxt.get("cssSelector", "")
+                # Só agrupa se for no mesmo elemento (mesmo xpath ou mesmo css)
+                if (nxt_xpath and nxt_xpath != xpath) or (nxt_css and nxt_css != css):
+                    break
+                count += 1
+                j += 1
+            actions.append({"type": "key_press", "key": key, "count": count, "url": url, "xpath": xpath, "css_selector": css})
+            i = j
             continue
 
         if atype == "navigation":
@@ -69,9 +111,10 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
         if atype == "click":
             xpath = action.get("xpath", "")
             target = action.get("targetText", "").strip()
-            # Pula scroll/key_press para ver se vem input no mesmo xpath
+            # Pula apenas scroll para ver se vem input no mesmo xpath
+            # NÃO pula key_press — eles devem ser preservados como ações independentes
             j = i + 1
-            while j < len(raw_steps) and raw_steps[j].get("type") in ("scroll", "key_press"):
+            while j < len(raw_steps) and raw_steps[j].get("type") == "scroll":
                 j += 1
             if j < len(raw_steps) and raw_steps[j].get("type") == "input" and raw_steps[j].get("xpath") == xpath:
                 inp = raw_steps[j]
@@ -229,119 +272,18 @@ def name_steps(grouped: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Geração de código Playwright
-# ---------------------------------------------------------------------------
-
-def _xpath_absolute(xpath: str) -> str:
-    """Garante que o XPath começa com // para uso com page.locator."""
-    if xpath and not xpath.startswith("//") and not xpath.startswith("id("):
-        return "//" + xpath
-    return xpath
-
-
-def _locator_expr(step: dict) -> str:
-    """Retorna a expressão de locator mais confiável para o step."""
-    css = step.get("css_selector", "")
-    xpath = step.get("xpath", "")
-    if css:
-        return f'page.locator({css!r})'
-    elif xpath:
-        abs_xpath = _xpath_absolute(xpath)
-        # usa repr para escapar aspas internas corretamente
-        locator_str = f"xpath={abs_xpath}"
-        return f'page.locator({locator_str!r})'
-    return 'page.locator("body")'
-
-
-def _action_block(action: dict, idx: int) -> list[str]:
-    """
-    Gera um bloco try/except para uma ação individual.
-    Em caso de erro, registra na lista `errors` e não interrompe o fluxo.
-    Retorna lista de linhas indentadas com 4 espaços (corpo da função).
-    """
-    atype = action["type"]
-    label = f"acao_{idx + 1}_{atype}"
-    lines = []
-
-    if atype == "navigation":
-        url = action["url"]
-        body = [
-            f'        await page.goto({url!r})',
-            "        await page.wait_for_load_state('networkidle')",
-        ]
-
-    elif atype == "fill":
-        locator = _locator_expr(action)
-        value = action.get("value", "")
-        target = action.get("target_text", "") or action.get("xpath", "")
-        label = f"acao_{idx + 1}_fill_{_slug(target)[:30]}" if target else label
-        body = [
-            f'        await {locator}.click()',
-            f'        await {locator}.fill({value!r})',
-        ]
-
-    elif atype == "click":
-        locator = _locator_expr(action)
-        target = action.get("target_text", "") or action.get("xpath", "")
-        label = f"acao_{idx + 1}_click_{_slug(target)[:30]}" if target else label
-        body = [
-            f'        await {locator}.click()',
-            "        await page.wait_for_timeout(500)",
-        ]
-
-    else:
-        return []
-
-    lines += [
-        f'    try:',
-    ] + body + [
-        f'    except Exception as e:',
-        f'        errors.append(({label!r}, str(e)))',
-    ]
-    return lines
-
-
-def generate_tool_function(group: dict) -> str:
-    """
-    Gera uma função async Playwright para um micro-processo.
-    Cada ação é envolta em try/except individual.
-    Retorna True se nenhum erro ocorreu, False caso contrário.
-    """
-    name = group["tool_name"]
-    actions = group["actions"]
-
-    lines = [
-        f"async def {name}(page) -> bool:",
-        f'    """Executa o passo \'{name}\'. Retorna True se todas as ações tiveram sucesso."""',
-        "    errors: list[tuple[str, str]] = []",
-        "",
-    ]
-
-    for idx, action in enumerate(actions):
-        block = _action_block(action, idx)
-        if block:
-            lines.extend(block)
-            lines.append("")
-
-    lines += [
-        "    if errors:",
-        f'        print(f"[FAIL] {name}: {{len(errors)}} erro(s)")',
-        "        for label, msg in errors:",
-        '            print(f"  - {label}: {msg}")',
-        "        return False",
-        f'    print(f"[OK] {name}")',
-        "    return True",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Saída: tools individuais
+# Saída: tools individuais — delegada ao tool_generator (LLM)
 # ---------------------------------------------------------------------------
 
 def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]):
-    """Salva cada step como tool Python em tools/, sem sobrescrever existentes."""
+    """
+    Gera tools para cada micro-processo via LLM (tool_generator).
+    O LLM recebe a lista completa de ações e gera o código Python garantindo
+    que nenhum passo seja omitido.
+    Não sobrescreve tools já existentes.
+    """
+    from tool_generator import generate_tool_from_actions
+
     saved = []
     for step in named_steps:
         name = step["tool_name"]
@@ -350,13 +292,7 @@ def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str
             saved.append(name)
             continue
 
-        func_code = generate_tool_function(step)
-        header = (
-            "from playwright.async_api import Page\n\n"
-        )
-        path = tools_dir / f"{name}.py"
-        path.write_text(header + func_code, encoding="utf-8")
-        print(f"  [tool] gerado: {path}")
+        generate_tool_from_actions(name, step["actions"])
         saved.append(name)
     return saved
 
