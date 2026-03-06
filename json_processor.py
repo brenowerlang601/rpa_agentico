@@ -31,9 +31,17 @@ def _slug(text: str) -> str:
     return text.strip("_")
 
 
-def _base_url(url: str) -> str:
-    """Retorna URL sem fragment (#...) para comparar mudança de página."""
-    return url.split("#")[0]
+def _screen_key(url: str) -> str:
+    """
+    Chave única de tela: path da URL (sem query string) + fragment.
+    Ignora query string porque em SPAs como NXJ o managerId muda mas a tela é a mesma.
+    O fragment (#0x, #1, etc.) identifica a tela dentro do SPA.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    # path sem query + fragment (sem query string interna ao fragment)
+    frag = parsed.fragment.split("?")[0] if parsed.fragment else ""
+    return parsed.scheme + "://" + parsed.netloc + parsed.path + "#" + frag
 
 
 def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
@@ -120,10 +128,10 @@ def group_into_micro_processes(actions: list[dict]) -> list[dict]:
 
     groups: list[dict] = []
     current_actions: list[dict] = []
-    current_url = _base_url(actions[0].get("url", ""))
+    current_url = _screen_key(actions[0].get("url", ""))
 
     for action in actions:
-        action_url = _base_url(action.get("url", ""))
+        action_url = _screen_key(action.get("url", ""))
 
         # Mudança de página: fecha grupo atual, abre novo
         if action_url != current_url and current_actions:
@@ -161,9 +169,17 @@ def name_groups(groups: list[dict]) -> list[dict]:
         url = group["url"]
         actions = group["actions"]
 
-        # Nome base da página a partir da URL
-        path = urlparse(url).path
-        page_slug = _slug(path.split("/")[-1].split(".")[0]) or "pagina"
+        # Nome base da página a partir da URL (path + fragment para SPAs NXJ)
+        parsed = urlparse(url)
+        path = parsed.path
+        fragment = parsed.fragment  # ex: "0x", "1", "pedi_f130"
+        path_slug = _slug(path.split("/")[-1].split(".")[0])
+        # Inclui o fragment no slug apenas quando ele tem valor semântico (não é numero/0x)
+        frag_slug = _slug(fragment) if fragment else ""
+        if frag_slug and not re.fullmatch(r"[0-9]+x?", fragment):
+            page_slug = f"{path_slug}_{frag_slug}" if path_slug else frag_slug
+        else:
+            page_slug = path_slug or "pagina"
 
         # Classifica o grupo pelo conteúdo das ações
         fills = [a for a in actions if a["type"] == "fill"]
