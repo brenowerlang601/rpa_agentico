@@ -469,13 +469,24 @@ if __name__ == "__main__":
         print("Nenhum arquivo JSON encontrado em json_rpa/")
         sys.exit(1)
 
-    if len(files) == 1:
-        process_json(files[0])
+    existing_tests = {p.stem for p in TESTS_DIR.glob("*.py")}
+
+    print("\nArquivos disponíveis em json_rpa/:")
+    print("-" * 40)
+    for idx, f in enumerate(files, start=1):
+        test_slug = _slug(json.loads(f.read_text(encoding="utf-8")).get("name", f.stem))
+        status = " [já gerado]" if test_slug in existing_tests else ""
+        print(f"  {idx}. {f.name}{status}")
+    if len(files) > 1:
+        print(f"  0. Processar todos")
+    print("-" * 40)
+
+    choice = input("Escolha: ").strip()
+
+    if choice == "0" and len(files) > 1:
+        for f in files:
+            process_json(f)
     else:
-        print("JSONs disponíveis em json_rpa/:")
-        for idx, f in enumerate(files):
-            print(f"  {idx + 1}. {f.name}")
-        choice = input("Escolha o número do arquivo: ").strip()
         try:
             selected = files[int(choice) - 1]
         except (ValueError, IndexError):
