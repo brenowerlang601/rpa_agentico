@@ -21,6 +21,7 @@
     .btn-primary { background: #7c3aed; color: #fff; }
     .btn-success { background: #059669; color: #fff; }
     .btn-outline { background: transparent; color: #a0aec0; border: 1px solid #4a5568; }
+    .btn-danger { background: #c53030; color: #fff; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
     .workflow-name-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 220px; }
 
@@ -40,12 +41,15 @@
     .terminal-output { flex: 1; overflow-y: auto; padding: 8px 14px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
     .terminal-output .line { white-space: pre-wrap; word-break: break-all; }
     .terminal-output .line.ok { color: #6ee7b7; }
-    .terminal-output .line.fail { color: #fc8181; }
+    .terminal-output .line.fail { color: #fc8181; cursor: pointer; text-decoration: underline dotted; }
+    .terminal-output .line.fail:hover { color: #feb2b2; }
     .terminal-output .line.sep { color: #4a5568; }
     .terminal-output .line.dim { color: #718096; }
     .btn-run { background: #d97706; color: #fff; }
     .btn-run:hover { background: #b45309; opacity: 1; }
     .btn-run.running { background: #4a5568; cursor: not-allowed; }
+    .btn-cancel { background: #c53030; color: #fff; display: none; }
+    .btn-cancel.visible { display: inline; }
 
     /* SIDEBAR — biblioteca de tools */
     .sidebar { width: 260px; background: #141622; border-right: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
@@ -54,9 +58,11 @@
     .tool-card { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: grab; display: flex; align-items: center; gap: 8px; transition: border-color .15s, background .15s; user-select: none; }
     .tool-card:hover { border-color: #7c3aed; background: #252840; }
     .tool-card .grip { color: #4a5568; font-size: 14px; }
-    .tool-card .tool-name { font-size: 13px; color: #e2e8f0; word-break: break-all; }
-    .tool-card .edit-btn { margin-left: auto; color: #718096; background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
-    .tool-card .edit-btn:hover { color: #a78bfa; background: #2d3748; }
+    .tool-card .tool-name { font-size: 13px; color: #e2e8f0; word-break: break-all; flex: 1; }
+    .tool-card .card-btn { color: #718096; background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+    .tool-card .card-btn:hover { color: #a78bfa; background: #2d3748; }
+    .tool-card .card-btn.del:hover { color: #fc8181; background: #2d3748; }
+    .tool-card .card-btn.ren:hover { color: #68d391; background: #2d3748; }
 
     /* CANVAS — fluxo atual */
     .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -66,9 +72,11 @@
     .drop-zone.drag-over { border-color: #7c3aed; background: #1a1a2e; }
     .flow-block { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; }
     .flow-block:hover { border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed22; }
+    .flow-block.pending { border-color: #744210; background: #1a150a; }
     .flow-block.sortable-ghost { opacity: .4; }
     .flow-block .step-num { font-size: 11px; color: #4a5568; min-width: 22px; text-align: center; background: #0f1117; border-radius: 4px; padding: 2px 4px; }
     .flow-block .step-name { font-size: 13px; flex: 1; }
+    .flow-block .step-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #744210; color: #fbd38d; }
     .flow-block .block-actions { display: flex; gap: 6px; }
     .flow-block .block-btn { background: none; border: none; color: #4a5568; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
     .flow-block .block-btn:hover { color: #a78bfa; background: #2d3748; }
@@ -104,6 +112,10 @@
     #toast.ok { border-color: #059669; color: #6ee7b7; }
     #toast.err { border-color: #e53e3e; color: #fc8181; }
 
+    /* Confirm dialog inline */
+    .confirm-bar { background: #2d1a1a; border: 1px solid #c53030; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+    .confirm-bar span { flex: 1; color: #fc8181; }
+
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
   </style>
 </head>
@@ -116,6 +128,7 @@
   <button class="btn btn-outline btn-sm" onclick="loadWorkflow()">Carregar fluxo...</button>
   <button class="btn btn-success" onclick="saveWorkflow()">Salvar script</button>
   <button class="btn btn-run" id="runBtn" onclick="runWorkflow()">&#9654; Executar</button>
+  <button class="btn btn-cancel" id="cancelBtn" onclick="cancelRun()">&#9632; Cancelar</button>
 </header>
 
 <div class="workspace">
@@ -213,6 +226,30 @@
   </div>
 </div>
 
+<!-- MODAL: renomear tool -->
+<div class="modal-overlay hidden" id="renameModal">
+  <div class="modal" style="width:400px;">
+    <div class="modal-header">
+      <span class="modal-title">Renomear tool</span>
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('renameModal').classList.add('hidden')">Fechar</button>
+    </div>
+    <div class="modal-body" style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+      <div>
+        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Nome atual</label>
+        <div id="renameOldName" style="font-size:13px; color:#a78bfa; padding:6px 10px; background:#0f1117; border-radius:6px;"></div>
+      </div>
+      <div>
+        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Novo nome</label>
+        <input class="workflow-name-input" id="renameNewName" type="text" placeholder="Ex: fazer_login_sistema" style="width:100%;" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="document.getElementById('renameModal').classList.add('hidden')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmRename()">Renomear</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: selecionar JSON existente -->
 <div class="modal-overlay hidden" id="jsonPickerModal">
   <div class="modal" style="width:480px;">
@@ -245,9 +282,11 @@
 // ─── Estado global ───────────────────────────────────────────────────────────
 let allTools = [];        // [{name, code}]
 let flowSteps = [];       // [toolName, ...]
+let pendingSteps = new Set(); // tools ainda sendo geradas
 let currentEditTool = null;
-let editorCM = null;      // CodeMirror editor do modal
-let previewCM = null;     // CodeMirror do preview
+let renamingTool = null;
+let editorCM = null;
+let previewCM = null;
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -255,6 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTools();
   initDropZone();
   initUploadDrag();
+
+  document.getElementById('saveScriptName').addEventListener('input', function() {
+    const val = this.value.trim() || 'workflow';
+    document.getElementById('saveFilePreview').textContent = val + '.py';
+  });
+
+  document.getElementById('renameNewName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmRename();
+  });
 });
 
 // ─── Preview CodeMirror ───────────────────────────────────────────────────────
@@ -283,12 +331,16 @@ function renderLibrary() {
     card.innerHTML = `
       <span class="grip">⠿</span>
       <span class="tool-name">${tool.name}</span>
-      <button class="edit-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">✎</button>
+      <button class="card-btn ren" title="Renomear" onclick="openRename('${tool.name}', event)">✏</button>
+      <button class="card-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">⊞</button>
+      <button class="card-btn del" title="Deletar tool" onclick="deleteTool('${tool.name}', event)">✕</button>
     `;
     card.addEventListener('dblclick', () => addToFlow(tool.name));
     lib.appendChild(card);
   });
   initLibrarySortable();
+  // Atualiza badges de pending no canvas
+  updatePendingBadges();
 }
 
 // ─── Drag-and-drop: biblioteca → canvas ──────────────────────────────────────
@@ -308,16 +360,14 @@ function initDropZone() {
     animation: 150,
     ghostClass: 'sortable-ghost',
     onAdd(evt) {
-      // Item arrastado da biblioteca para o canvas
       const toolName = evt.item.dataset.tool;
-      evt.item.remove(); // remove o clone do sortable, vamos renderizar nós mesmos
+      evt.item.remove();
       const insertIdx = evt.newIndex;
       flowSteps.splice(insertIdx, 0, toolName);
       renderFlow();
       refreshPreview();
     },
     onUpdate() {
-      // Reordenação dentro do canvas — sincroniza flowSteps pela ordem DOM
       syncFlowFromDOM();
       refreshPreview();
     },
@@ -333,7 +383,6 @@ function syncFlowFromDOM() {
 function renderFlow() {
   const zone = document.getElementById('dropZone');
   const hint = document.getElementById('emptyHint');
-  // Limpa blocos mas mantém o hint
   zone.querySelectorAll('.flow-block').forEach(b => b.remove());
 
   if (flowSteps.length === 0) {
@@ -342,23 +391,43 @@ function renderFlow() {
   }
   hint.style.display = 'none';
 
+  const existingNames = new Set(allTools.map(t => t.name));
+
   flowSteps.forEach((name, idx) => {
+    const isPending = !existingNames.has(name);
     const block = document.createElement('div');
-    block.className = 'flow-block';
+    block.className = 'flow-block' + (isPending ? ' pending' : '');
     block.dataset.tool = name;
     block.innerHTML = `
       <span class="step-num">${idx + 1}</span>
       <span class="step-name">${name}</span>
+      ${isPending ? '<span class="step-badge">gerando...</span>' : ''}
       <div class="block-actions">
-        <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)">✎</button>
+        <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)" ${isPending ? 'disabled style="opacity:.4"' : ''}>✎</button>
         <button class="block-btn remove" title="Remover" onclick="removeStep(${idx})">✕</button>
       </div>
     `;
     zone.appendChild(block);
   });
 
-  // Reinicializa o sortable no canvas para permitir reordenação
   initDropZone();
+}
+
+function updatePendingBadges() {
+  // Atualiza os blocos do canvas com base nas tools que agora existem
+  const existingNames = new Set(allTools.map(t => t.name));
+  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
+    const name = block.dataset.tool;
+    const isPending = !existingNames.has(name);
+    block.classList.toggle('pending', isPending);
+    const badge = block.querySelector('.step-badge');
+    if (!isPending && badge) badge.remove();
+    const editBtn = block.querySelector('.block-btn:not(.remove)');
+    if (editBtn) {
+      editBtn.disabled = isPending;
+      editBtn.style.opacity = isPending ? '.4' : '';
+    }
+  });
 }
 
 function addToFlow(toolName) {
@@ -394,6 +463,7 @@ function openEditor(toolName, evt) {
   document.getElementById('modalTitle').textContent = `Editando: ${toolName}.py`;
 
   fetch(`/api/tool/${toolName}`).then(r => r.json()).then(data => {
+    if (data.error) { toast(data.error, 'err'); return; }
     document.getElementById('editorModal').classList.remove('hidden');
     const container = document.getElementById('editorContainer');
     container.innerHTML = '';
@@ -427,10 +497,80 @@ function saveTool() {
     body: JSON.stringify({ code }),
   }).then(r => r.json()).then(() => {
     toast('Tool salva com sucesso!', 'ok');
-    // Atualiza o cache local
     const t = allTools.find(t => t.name === currentEditTool);
     if (t) t.code = code;
     closeModal();
+  });
+}
+
+// ─── Deletar tool ────────────────────────────────────────────────────────────
+function deleteTool(toolName, evt) {
+  if (evt) evt.stopPropagation();
+
+  // Confirmação inline na própria card
+  const card = document.querySelector(`.tool-card[data-tool="${toolName}"]`);
+  if (!card) return;
+
+  // Evita duplicar confirm
+  if (card.querySelector('.confirm-bar')) return;
+
+  const bar = document.createElement('div');
+  bar.className = 'confirm-bar';
+  bar.innerHTML = `
+    <span>Deletar "${toolName}"?</span>
+    <button class="btn btn-danger btn-sm" onclick="confirmDeleteTool('${toolName}')">Deletar</button>
+    <button class="btn btn-outline btn-sm" onclick="this.closest('.confirm-bar').remove()">Cancelar</button>
+  `;
+  card.after(bar);
+}
+
+function confirmDeleteTool(toolName) {
+  fetch(`/api/tool/${toolName}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { toast(data.error, 'err'); return; }
+      allTools = allTools.filter(t => t.name !== toolName);
+      renderLibrary();
+      toast(`Tool "${toolName}" deletada`, 'ok');
+    });
+}
+
+// ─── Renomear tool ────────────────────────────────────────────────────────────
+function openRename(toolName, evt) {
+  if (evt) evt.stopPropagation();
+  renamingTool = toolName;
+  document.getElementById('renameOldName').textContent = toolName;
+  document.getElementById('renameNewName').value = toolName;
+  document.getElementById('renameModal').classList.remove('hidden');
+  setTimeout(() => {
+    const inp = document.getElementById('renameNewName');
+    inp.focus();
+    inp.select();
+  }, 50);
+}
+
+function confirmRename() {
+  const newName = document.getElementById('renameNewName').value.trim();
+  if (!newName || !renamingTool) return;
+
+  fetch(`/api/tool/${renamingTool}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_name: newName }),
+  }).then(r => r.json()).then(data => {
+    if (data.error) { toast(data.error, 'err'); return; }
+    const finalName = data.new_name;
+    // Atualiza allTools local
+    const t = allTools.find(t => t.name === renamingTool);
+    if (t) t.name = finalName;
+    // Atualiza flowSteps se a tool estava no fluxo
+    flowSteps = flowSteps.map(s => s === renamingTool ? finalName : s);
+    document.getElementById('renameModal').classList.add('hidden');
+    renamingTool = null;
+    renderLibrary();
+    renderFlow();
+    refreshPreview();
+    toast(`Tool renomeada para "${finalName}"`, 'ok');
   });
 }
 
@@ -450,20 +590,19 @@ function doUpload(file) {
     .then(r => r.json())
     .then(data => {
       if (data.error) { toast(data.error, 'err'); return; }
-      // Carrega o fluxo recém-gerado automaticamente
       document.getElementById('workflowName').value = data.workflow_name;
       flowSteps = data.steps;
+      pendingSteps = new Set(data.steps);
       renderFlow();
       refreshPreview();
       toast(`${data.steps.length} steps identificados. Gerando tools em background...`, 'ok');
-      // Aguarda tools serem geradas e atualiza a biblioteca periodicamente
       pollTools(data.steps, 0);
     })
     .catch(() => toast('Erro ao processar o arquivo', 'err'));
 }
 
 function pollTools(expectedSteps, attempts) {
-  if (attempts > 30) return; // para após ~5 min
+  if (attempts > 30) return;
   setTimeout(() => {
     fetch('/api/tools').then(r => r.json()).then(tools => {
       allTools = tools;
@@ -471,12 +610,13 @@ function pollTools(expectedSteps, attempts) {
       const generated = tools.map(t => t.name);
       const pending = expectedSteps.filter(s => !generated.includes(s));
       if (pending.length === 0) {
+        pendingSteps.clear();
         toast('Todas as tools geradas com sucesso!', 'ok');
       } else {
         pollTools(expectedSteps, attempts + 1);
       }
     });
-  }, 10000); // verifica a cada 10s
+  }, 10000);
 }
 
 // Drag-and-drop de arquivo na área de upload
@@ -555,7 +695,6 @@ function selectWorkflow(slug, steps, name) {
   flowSteps = steps;
   renderFlow();
   refreshPreview();
-  document.getElementById('loadModal').classList.remove('hidden');
   document.getElementById('loadModal').classList.add('hidden');
 }
 
@@ -565,19 +704,11 @@ function saveWorkflow() {
   const saveNameInput = document.getElementById('saveWorkflowName');
   const saveScriptInput = document.getElementById('saveScriptName');
   saveNameInput.value = workflowName;
-  // Sugere nome do script baseado no workflow name (slug simples)
   const slug = workflowName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   saveScriptInput.value = slug || 'workflow';
   document.getElementById('saveFilePreview').textContent = (slug || 'workflow') + '.py';
   document.getElementById('saveModal').classList.remove('hidden');
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('saveScriptName').addEventListener('input', function() {
-    const val = this.value.trim() || 'workflow';
-    document.getElementById('saveFilePreview').textContent = val + '.py';
-  });
-});
 
 function confirmSave() {
   const workflowName = document.getElementById('saveWorkflowName').value || 'workflow';
@@ -593,17 +724,15 @@ function confirmSave() {
 }
 
 // ─── Execução via SSE ─────────────────────────────────────────────────────────
-let activeSource = null;
-
 function runWorkflow() {
   if (flowSteps.length === 0) { toast('Nenhum step no fluxo', 'err'); return; }
 
   const runBtn = document.getElementById('runBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
   if (runBtn.classList.contains('running')) return;
 
   const name = document.getElementById('workflowName').value || 'workflow';
 
-  // Abre terminal
   const panel = document.getElementById('terminalPanel');
   const output = document.getElementById('terminalOutput');
   const status = document.getElementById('terminalStatus');
@@ -614,14 +743,11 @@ function runWorkflow() {
   status.textContent = 'Executando...';
   runBtn.classList.add('running');
   runBtn.textContent = '⏳ Executando';
+  cancelBtn.classList.add('visible');
 
   appendLine(`Iniciando fluxo: ${name}`, 'dim');
   appendLine('─'.repeat(44), 'sep');
 
-  // Cancela SSE anterior se houver
-  if (activeSource) { activeSource.close(); activeSource = null; }
-
-  // Inicia a execução via fetch + ReadableStream (SSE manual para suportar POST)
   fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -636,10 +762,10 @@ function runWorkflow() {
         if (done) { finishRun(null); return; }
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
-        buffer = parts.pop(); // mantém fragmento incompleto
+        buffer = parts.pop();
         for (const part of parts) {
           if (!part.startsWith('data: ')) continue;
-          const line = part.slice(6); // remove "data: "
+          const line = part.slice(6);
           if (line.startsWith('__EXIT__')) {
             finishRun(parseInt(line.replace('__EXIT__', ''), 10));
             return;
@@ -656,29 +782,49 @@ function runWorkflow() {
   });
 }
 
+// ─── Cancelar execução ────────────────────────────────────────────────────────
+function cancelRun() {
+  fetch('/api/run/cancel', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      appendLine('[CANCELADO] Execução interrompida pelo usuário', 'fail');
+      finishRun(1);
+    });
+}
+
 function renderLine(line) {
   if (line.startsWith('[OK]')) appendLine(line, 'ok');
   else if (line.startsWith('[FAIL]') || line.startsWith('  - ')) appendLine(line, 'fail');
   else if (line.startsWith('=') || line.startsWith('-')) appendLine(line, 'sep');
   else if (line.startsWith('  [PASS]')) appendLine(line, 'ok');
-  else if (line.startsWith('  [FAIL]')) appendLine(line, 'fail');
+  else if (line.startsWith('  [FAIL]')) {
+    // Extrai nome da tool para permitir clique direto no editor
+    const match = line.match(/\[FAIL\]\s+(\S+)/);
+    appendLine(line, 'fail', match ? match[1] : null);
+  }
   else appendLine(line, '');
 }
 
-function appendLine(text, cls = '') {
+function appendLine(text, cls = '', toolLink = null) {
   const output = document.getElementById('terminalOutput');
   const div = document.createElement('div');
   div.className = `line ${cls}`;
   div.textContent = text;
+  if (toolLink) {
+    div.title = `Clique para editar a tool ${toolLink}`;
+    div.addEventListener('click', () => openEditor(toolLink, null));
+  }
   output.appendChild(div);
   output.scrollTop = output.scrollHeight;
 }
 
 function finishRun(code) {
   const runBtn = document.getElementById('runBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
   const status = document.getElementById('terminalStatus');
   runBtn.classList.remove('running');
   runBtn.innerHTML = '&#9654; Executar';
+  cancelBtn.classList.remove('visible');
 
   if (code === null) return;
   if (code === 0) {

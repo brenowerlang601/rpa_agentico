@@ -51,7 +51,9 @@ async def preencher_forms(page) -> bool:
     try:
         locator = page.locator('//*[@id="data_prev_receb."]')
         await locator.click()
-        await locator.fill("0703")
+        from datetime import date, timedelta
+        tomorrow = date.today() + timedelta(days=1)
+        await locator.fill(tomorrow.strftime("%d%m"))
     except Exception as e:
         errors.append(("fill data_prev_receb.", str(e)))
     

@@ -7,6 +7,7 @@ Interface web para gerenciar workflows RPA.
 """
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,10 @@ app = Flask(__name__)
 JSON_RPA_DIR = Path("json_rpa")
 JSON_RPA_DIR.mkdir(exist_ok=True)
 
+# Processo ativo de execução (para poder cancelar)
+_active_proc: subprocess.Popen | None = None
+_active_proc_lock = threading.Lock()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,14 +52,12 @@ def _all_workflows() -> list[dict]:
     """Retorna todos os scripts de teste gerados em tests/."""
     workflows = []
     for p in sorted(TESTS_DIR.glob("*.py")):
-        if p.stem == "__init__":
+        if p.stem == "__init__" or p.stem.startswith("rpa_run_"):
             continue
-        # Extrai a sequência de tools do script parseando os imports
         code = p.read_text(encoding="utf-8")
         steps = []
         for line in code.splitlines():
             if line.startswith("        results["):
-                # results['tool_name'] = await tool_name(page)
                 name = line.strip().split("'")[1]
                 steps.append(name)
         workflows.append({"name": p.stem, "steps": steps, "file": p.name})
@@ -184,6 +187,52 @@ def api_tool_save(name: str):
     return jsonify({"ok": True})
 
 
+@app.route("/api/tool/<name>", methods=["DELETE"])
+def api_tool_delete(name: str):
+    """Deleta uma tool da pasta tools/."""
+    p = TOOLS_DIR / f"{name}.py"
+    if not p.exists():
+        return jsonify({"error": "Tool não encontrada"}), 404
+    p.unlink()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/tool/<name>/rename", methods=["POST"])
+def api_tool_rename(name: str):
+    """Renomeia uma tool (arquivo + nome da função dentro do código)."""
+    new_name = request.json.get("new_name", "").strip()
+    if not new_name:
+        return jsonify({"error": "Novo nome inválido"}), 400
+    new_name = re.sub(r"[^a-zA-Z0-9_]", "_", new_name)
+
+    old_path = TOOLS_DIR / f"{name}.py"
+    new_path = TOOLS_DIR / f"{new_name}.py"
+    if not old_path.exists():
+        return jsonify({"error": "Tool não encontrada"}), 404
+    if new_path.exists():
+        return jsonify({"error": f"Já existe uma tool chamada '{new_name}'"}), 409
+
+    code = old_path.read_text(encoding="utf-8")
+    # Substitui o nome da função principal no código
+    code = re.sub(rf"\basync def {re.escape(name)}\b", f"async def {new_name}", code)
+    code = re.sub(rf"\bdef {re.escape(name)}\b", f"def {new_name}", code)
+
+    new_path.write_text(code, encoding="utf-8")
+    old_path.unlink()
+    return jsonify({"ok": True, "new_name": new_name})
+
+
+@app.route("/api/tools/check", methods=["POST"])
+def api_tools_check():
+    """Verifica quais tools de uma lista existem em tools/."""
+    steps = request.json.get("steps", [])
+    existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
+    return jsonify({
+        "existing": [s for s in steps if s in existing],
+        "pending": [s for s in steps if s not in existing],
+    })
+
+
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     """Recebe upload de JSON, salva em json_rpa/ e processa."""
@@ -196,7 +245,6 @@ def api_upload():
     dest = JSON_RPA_DIR / f.filename
     f.save(dest)
 
-    # Calcula os steps imediatamente (sem LLM)
     data = json.loads(dest.read_text(encoding="utf-8"))
     workflow_name = data.get("name", dest.stem)
     raw_steps = data.get("steps", [])
@@ -204,7 +252,6 @@ def api_upload():
     named = name_steps(grouped)
     steps = [s["tool_name"] for s in named]
 
-    # Gera as tools em background para não bloquear o browser
     def _generate_tools():
         try:
             process_json(dest)
@@ -239,18 +286,15 @@ def api_save_workflow():
     script_name = data.get("script_name", "").strip()
     steps = data.get("steps", [])
     named = [{"tool_name": s} for s in steps]
-    # Usa script_name customizado se fornecido, senão gera pelo workflow_name
     if script_name:
-        # Sanitiza: mantém apenas letras, números e underscores
-        import re as _re
-        script_name = _re.sub(r"[^a-zA-Z0-9_]", "_", script_name)
-        path = TESTS_DIR / f"{script_name}.py"
-        # Usa save_test_script e renomeia se necessário
+        script_name = re.sub(r"[^a-zA-Z0-9_]", "_", script_name)
         tmp_path = save_test_script(workflow_name, named, TESTS_DIR)
         if tmp_path.stem != script_name:
             path = TESTS_DIR / f"{script_name}.py"
             path.write_text(tmp_path.read_text(encoding="utf-8"), encoding="utf-8")
             tmp_path.unlink()
+        else:
+            path = tmp_path
     else:
         path = save_test_script(workflow_name, named, TESTS_DIR)
     return jsonify({"ok": True, "file": path.name})
@@ -259,9 +303,11 @@ def api_save_workflow():
 @app.route("/api/run", methods=["POST"])
 def api_run():
     """
-    Executa o script gerado para os steps fornecidos via SSE (Server-Sent Events).
+    Executa o script gerado para os steps fornecidos via SSE.
     Salva um script temporário, executa com o Python do venv e faz stream do output linha a linha.
     """
+    global _active_proc
+
     data = request.json
     workflow_name = data.get("workflow_name", "workflow")
     steps = data.get("steps", [])
@@ -269,8 +315,6 @@ def api_run():
     if not steps:
         return jsonify({"error": "Nenhum step para executar"}), 400
 
-    # Gera o script em arquivo temporário para execução
-    named = [{"tool_name": s} for s in steps]
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", prefix="rpa_run_", dir=TESTS_DIR, delete=False, encoding="utf-8"
     ) as tf:
@@ -280,6 +324,7 @@ def api_run():
     python_bin = Path(sys.executable)
 
     def generate():
+        global _active_proc
         try:
             proc = subprocess.Popen(
                 [str(python_bin), str(tmp_path)],
@@ -289,8 +334,9 @@ def api_run():
                 bufsize=1,
                 cwd=str(Path(__file__).parent),
             )
+            with _active_proc_lock:
+                _active_proc = proc
             for line in proc.stdout:
-                # SSE: cada linha vira um evento
                 yield f"data: {line.rstrip()}\n\n"
             proc.wait()
             code = proc.returncode
@@ -299,6 +345,8 @@ def api_run():
             yield f"data: [ERRO] {e}\n\n"
             yield "data: __EXIT__1\n\n"
         finally:
+            with _active_proc_lock:
+                _active_proc = None
             try:
                 tmp_path.unlink()
             except Exception:
@@ -306,6 +354,18 @@ def api_run():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/run/cancel", methods=["POST"])
+def api_run_cancel():
+    """Cancela o processo de execução em andamento."""
+    global _active_proc
+    with _active_proc_lock:
+        proc = _active_proc
+    if proc and proc.poll() is None:
+        proc.terminate()
+        return jsonify({"ok": True, "message": "Execução cancelada"})
+    return jsonify({"ok": False, "message": "Nenhuma execução em andamento"})
 
 
 if __name__ == "__main__":
