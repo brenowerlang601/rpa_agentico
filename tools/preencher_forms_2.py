@@ -19,7 +19,7 @@ async def preencher_forms_2(page) -> bool:
 
     try:
         # Fill: cd_it_pe_item.
-        locator = page.locator('//*[@id="repeat1."]/div[18]/input[1]')
+        locator = page.locator('//*[@id="repeat1."]/div[18]/input')
         await locator.click()
         await locator.fill("000006")
     except Exception as e:
@@ -38,11 +38,18 @@ async def preencher_forms_2(page) -> bool:
         await locator.fill("p")
     except Exception as e:
         errors.append(("fill cd_it_pe_subgrupo.", str(e)))
+        
+    try:
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(150)
+    except Exception as e:
+        errors.append(("key_press Enter tecido_peca.", str(e)))
 
     try:
         # Fill: qtde_pedida.
         locator = page.locator('//*[@id="repeat1."]/div[22]/input')
         await locator.click()
+        await page.keyboard.press("Backspace")
         await locator.fill("10")
     except Exception as e:
         errors.append(("fill qtde_pedida.", str(e)))
@@ -53,6 +60,7 @@ async def preencher_forms_2(page) -> bool:
     except Exception as e:
         errors.append(("key_press Enter tecido_peca.", str(e)))
         
+        
     try:
         # Fill: codigo_deposito.
         locator = page.locator('//*[@id="repeat1."]/div[23]/input')
@@ -61,32 +69,31 @@ async def preencher_forms_2(page) -> bool:
         await locator.fill("001")
     except Exception as e:
         errors.append(("fill codigo_deposito.", str(e)))
-
+ 
     try:
         # ✅ Registra handler ANTES do Enter para capturar o dialog
         async def handle_dialog(dialog):
             print(f"[DIALOG] Mensagem: {dialog.message}")
             await dialog.accept()  # Clica em OK
-
+ 
         page.on("dialog", handle_dialog)
-
+ 
         await page.keyboard.press("Enter")
         await page.wait_for_timeout(500)  # Aguarda o dialog aparecer e ser tratado
-
+ 
         # Remove o handler após uso para não interferir em outros dialogs
         page.remove_listener("dialog", handle_dialog)
-
+ 
     except Exception as e:
         errors.append(("key_press Enter + dialog deposito.", str(e)))
-
+        
         
     try:
         await page.keyboard.press("Enter")
         await page.wait_for_timeout(150)
     except Exception as e:
         errors.append(("key_press Enter tecido_peca.", str(e)))
-       
-    
+
     try:
         # Fill: valor_unitario.
         locator = page.locator('//*[@id="repeat1."]/div[25]/input')
@@ -95,7 +102,6 @@ async def preencher_forms_2(page) -> bool:
         await locator.fill("10")
     except Exception as e:
         errors.append(("fill valor_unitario.", str(e)))
-        
     try:
         # Fill: cd_it_pe_item.
         locator = page.locator('//*[@id="nxj_main_div"]/form/div[30]/input')
@@ -103,20 +109,18 @@ async def preencher_forms_2(page) -> bool:
         await locator.fill("2540")
     except Exception as e:
         errors.append(("fill cd_it_pe_item.", str(e)))
-        
     try:
         await page.keyboard.press("F9")
         await page.wait_for_timeout(150)
     except Exception as e:
         errors.append(("key_press Enter tecido_peca.", str(e)))
-        
     try:
         await page.keyboard.press("F1")
         await page.wait_for_timeout(150)
     except Exception as e:
         errors.append(("key_press Enter tecido_peca.", str(e)))
-        
 
+ 
         
     if not errors:
         print("[OK] preencher_forms_2")
