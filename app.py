@@ -184,6 +184,21 @@ def api_tool_code(name: str):
     return jsonify({"name": name, "code": p.read_text(encoding="utf-8")})
 
 
+@app.route("/api/tool/new", methods=["POST"])
+def api_tool_new():
+    """Cria uma nova tool do zero."""
+    name = request.json.get("name", "").strip()
+    code = request.json.get("code", "")
+    if not name:
+        return jsonify({"error": "Nome inválido"}), 400
+    name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+    p = TOOLS_DIR / f"{name}.py"
+    if p.exists():
+        return jsonify({"error": f"Já existe uma tool chamada '{name}'"}), 409
+    p.write_text(code, encoding="utf-8")
+    return jsonify({"ok": True, "name": name})
+
+
 @app.route("/api/tool/<name>", methods=["POST"])
 def api_tool_save(name: str):
     """Salva código editado de uma tool."""

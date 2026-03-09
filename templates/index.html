@@ -103,6 +103,7 @@
     .modal-title { font-size: 15px; font-weight: 600; flex: 1; }
     .modal-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
     .modal-body .CodeMirror { height: 480px; font-size: 13px; }
+    #newToolEditorContainer .CodeMirror { height: 420px; font-size: 13px; }
     .modal-footer { padding: 12px 20px; border-top: 1px solid #2d3748; display: flex; justify-content: flex-end; gap: 8px; }
 
     /* UPLOAD */
@@ -149,8 +150,11 @@
       <input type="file" id="fileInput" accept=".json" onchange="uploadJson(this)" />
     </div>
 
-    <div style="padding: 0 8px 8px;">
+    <div style="padding: 0 8px 4px;">
       <button class="btn btn-outline" style="width:100%; font-size:12px;" onclick="openJsonPicker()">&#128194; Selecionar JSON existente</button>
+    </div>
+    <div style="padding: 0 8px 8px;">
+      <button class="btn btn-primary" style="width:100%; font-size:12px;" onclick="openNewToolModal()">&#43; Nova tool</button>
     </div>
 
     <div class="tool-library" id="toolLibrary"></div>
@@ -277,6 +281,27 @@
     </div>
     <div class="modal-body" style="padding:16px; overflow-y:auto; max-height:400px;">
       <div id="workflowList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: nova tool -->
+<div class="modal-overlay hidden" id="newToolModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Nova tool</span>
+      <button class="btn btn-outline btn-sm" onclick="closeNewToolModal()">Fechar</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; gap:0;">
+      <div style="padding:12px 20px 8px; display:flex; align-items:center; gap:10px;">
+        <label style="font-size:12px; color:#718096; white-space:nowrap;">Nome da tool:</label>
+        <input class="workflow-name-input" id="newToolName" type="text" placeholder="Ex: fazer_login_sistema" style="flex:1;" />
+      </div>
+      <div id="newToolEditorContainer" style="flex:1;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeNewToolModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmNewTool()">Criar tool</button>
     </div>
   </div>
 </div>
@@ -907,6 +932,85 @@ function clearTerminal() {
 
 function closeTerminal() {
   document.getElementById('terminalPanel').classList.remove('open');
+}
+
+// ─── Nova tool do zero ────────────────────────────────────────────────────────
+let newToolCM = null;
+
+const NEW_TOOL_TEMPLATE = `from playwright.async_api import Page
+
+
+async def TOOL_NAME(page: Page) -> bool:
+    errors = []
+    try:
+        pass  # implemente as ações aqui
+    except Exception as e:
+        errors.append(str(e))
+
+    if errors:
+        print(f"[FAIL] TOOL_NAME")
+        for err in errors:
+            print(f"  - {err}")
+        return False
+    print(f"[OK] TOOL_NAME")
+    return True
+`;
+
+function openNewToolModal() {
+  document.getElementById('newToolName').value = '';
+  document.getElementById('newToolModal').classList.remove('hidden');
+
+  const container = document.getElementById('newToolEditorContainer');
+  container.innerHTML = '';
+  newToolCM = CodeMirror(container, {
+    value: NEW_TOOL_TEMPLATE.replace(/TOOL_NAME/g, 'minha_tool'),
+    mode: 'python',
+    theme: 'dracula',
+    lineNumbers: true,
+    indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    lineWrapping: false,
+    extraKeys: { Tab: cm => cm.replaceSelection('    ') },
+  });
+  setTimeout(() => newToolCM.refresh(), 50);
+
+  // Atualiza o template quando o nome muda
+  document.getElementById('newToolName').oninput = function() {
+    const name = this.value.trim().replace(/[^a-zA-Z0-9_]/g, '_') || 'minha_tool';
+    const current = newToolCM.getValue();
+    // Substitui somente se o código ainda parece ser o template
+    if (current.includes('async def ')) {
+      const updated = current.replace(/async def \w+\(/, `async def ${name}(`);
+      const withPrints = updated
+        .replace(/\[FAIL\] \w+"/g, `[FAIL] ${name}"`)
+        .replace(/\[OK\] \w+"/g, `[OK] ${name}"`);
+      newToolCM.setValue(withPrints);
+    }
+  };
+}
+
+function closeNewToolModal() {
+  document.getElementById('newToolModal').classList.add('hidden');
+  newToolCM = null;
+  document.getElementById('newToolName').oninput = null;
+}
+
+function confirmNewTool() {
+  const rawName = document.getElementById('newToolName').value.trim();
+  if (!rawName) { toast('Informe um nome para a tool', 'err'); return; }
+  const code = newToolCM ? newToolCM.getValue() : '';
+
+  fetch('/api/tool/new', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: rawName, code }),
+  }).then(r => r.json()).then(data => {
+    if (data.error) { toast(data.error, 'err'); return; }
+    closeNewToolModal();
+    loadTools();
+    toast(`Tool "${data.name}" criada com sucesso!`, 'ok');
+  });
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
