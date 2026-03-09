@@ -126,6 +126,47 @@ def api_workflows():
     return jsonify(_all_workflows())
 
 
+@app.route("/api/json-files")
+def api_json_files():
+    """Retorna todos os arquivos JSON disponíveis na pasta json_rpa/."""
+    files = []
+    for p in sorted(JSON_RPA_DIR.glob("*.json")):
+        files.append({"name": p.name, "stem": p.stem})
+    return jsonify(files)
+
+
+@app.route("/api/load-json", methods=["POST"])
+def api_load_json():
+    """Carrega e processa um JSON existente da pasta json_rpa/."""
+    filename = request.json.get("filename", "")
+    dest = JSON_RPA_DIR / filename
+    if not dest.exists() or not filename.endswith(".json"):
+        return jsonify({"error": "Arquivo não encontrado"}), 404
+
+    data = json.loads(dest.read_text(encoding="utf-8"))
+    workflow_name = data.get("name", dest.stem)
+    raw_steps = data.get("steps", [])
+    grouped = group_steps(raw_steps)
+    named = name_steps(grouped)
+    steps = [s["tool_name"] for s in named]
+
+    def _generate_tools():
+        try:
+            process_json(dest)
+        except Exception as e:
+            print(f"[load-json] Erro ao gerar tools: {e}")
+
+    t = threading.Thread(target=_generate_tools, daemon=True)
+    t.start()
+
+    return jsonify({
+        "workflow_name": workflow_name,
+        "workflow_slug": _slug(workflow_name),
+        "steps": steps,
+        "tools": _all_tools(),
+    })
+
+
 @app.route("/api/tool/<name>")
 def api_tool_code(name: str):
     p = TOOLS_DIR / f"{name}.py"
@@ -195,9 +236,23 @@ def api_save_workflow():
     """Salva o workflow (sequência de steps) como script de teste."""
     data = request.json
     workflow_name = data.get("workflow_name", "workflow")
+    script_name = data.get("script_name", "").strip()
     steps = data.get("steps", [])
     named = [{"tool_name": s} for s in steps]
-    path = save_test_script(workflow_name, named, TESTS_DIR)
+    # Usa script_name customizado se fornecido, senão gera pelo workflow_name
+    if script_name:
+        # Sanitiza: mantém apenas letras, números e underscores
+        import re as _re
+        script_name = _re.sub(r"[^a-zA-Z0-9_]", "_", script_name)
+        path = TESTS_DIR / f"{script_name}.py"
+        # Usa save_test_script e renomeia se necessário
+        tmp_path = save_test_script(workflow_name, named, TESTS_DIR)
+        if tmp_path.stem != script_name:
+            path = TESTS_DIR / f"{script_name}.py"
+            path.write_text(tmp_path.read_text(encoding="utf-8"), encoding="utf-8")
+            tmp_path.unlink()
+    else:
+        path = save_test_script(workflow_name, named, TESTS_DIR)
     return jsonify({"ok": True, "file": path.name})
 
 

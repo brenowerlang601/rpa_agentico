@@ -6,10 +6,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from playwright.async_api import async_playwright
 
+from tools.navegar_forms import navegar_forms
 from tools.fazer_login_forms import fazer_login_forms
-from tools.pesquisa_tela_pedi_f130 import pesquisa_tela_pedi_f130
-from tools.preencher_forms import preencher_forms
-from tools.preencher_forms_2 import preencher_forms_2
+from tools.clicar_pedido_de_vendas_forms import clicar_pedido_de_vendas_forms
 
 
 async def run():
@@ -19,14 +18,13 @@ async def run():
 
         results: dict[str, bool] = {}
 
+        results['navegar_forms'] = await navegar_forms(page)
         results['fazer_login_forms'] = await fazer_login_forms(page)
-        results['pesquisa_tela_pedi_f130'] = await pesquisa_tela_pedi_f130(page)
-        results['preencher_forms'] = await preencher_forms(page)
-        results['preencher_forms_2'] = await preencher_forms_2(page)
+        results['clicar_pedido_de_vendas_forms'] = await clicar_pedido_de_vendas_forms(page)
 
         print()
         print("=" * 50)
-        print(f"Relatório QA — recorded workflow semantic")
+        print(f"Relatório QA — Recorded Workflow (Semantic)")
         print("=" * 50)
         passed = [k for k, v in results.items() if v]
         failed = [k for k, v in results.items() if not v]
