@@ -73,6 +73,11 @@
     .flow-block { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; }
     .flow-block:hover { border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed22; }
     .flow-block.pending { border-color: #744210; background: #1a150a; }
+    .flow-block.running-now { border-color: #d97706; background: #1a1505; box-shadow: 0 0 0 2px #d9770644; }
+    .flow-block.run-ok { border-color: #059669; background: #091a12; }
+    .flow-block.run-fail { border-color: #c53030; background: #1a0909; }
+    .flow-block .run-indicator { font-size: 13px; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
     .flow-block.sortable-ghost { opacity: .4; }
     .flow-block .step-num { font-size: 11px; color: #4a5568; min-width: 22px; text-align: center; background: #0f1117; border-radius: 4px; padding: 2px 4px; }
     .flow-block .step-name { font-size: 13px; flex: 1; }
@@ -738,6 +743,7 @@ function runWorkflow() {
   const status = document.getElementById('terminalStatus');
   panel.classList.add('open');
   output.innerHTML = '';
+  clearStepHighlights();
   status.style.display = 'inline';
   status.className = 'terminal-status running';
   status.textContent = 'Executando...';
@@ -793,16 +799,67 @@ function cancelRun() {
 }
 
 function renderLine(line) {
+  if (line.startsWith('__RUNNING__')) {
+    const toolName = line.slice('__RUNNING__'.length).trim();
+    highlightRunningStep(toolName);
+    return; // não exibe no terminal
+  }
   if (line.startsWith('[OK]')) appendLine(line, 'ok');
   else if (line.startsWith('[FAIL]') || line.startsWith('  - ')) appendLine(line, 'fail');
   else if (line.startsWith('=') || line.startsWith('-')) appendLine(line, 'sep');
-  else if (line.startsWith('  [PASS]')) appendLine(line, 'ok');
+  else if (line.startsWith('  [PASS]')) {
+    const match = line.match(/\[PASS\]\s+(\S+)/);
+    if (match) markStepResult(match[1], true);
+    appendLine(line, 'ok');
+  }
   else if (line.startsWith('  [FAIL]')) {
-    // Extrai nome da tool para permitir clique direto no editor
     const match = line.match(/\[FAIL\]\s+(\S+)/);
+    if (match) markStepResult(match[1], false);
     appendLine(line, 'fail', match ? match[1] : null);
   }
   else appendLine(line, '');
+}
+
+function highlightRunningStep(toolName) {
+  // Remove running-now de todos e marca o atual
+  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
+    block.classList.remove('running-now');
+    // Limpa indicador de pulso anterior
+    const ind = block.querySelector('.run-indicator');
+    if (ind) ind.remove();
+  });
+
+  const block = document.querySelector(`#dropZone .flow-block[data-tool="${toolName}"]`);
+  if (!block) return;
+  block.classList.add('running-now');
+  block.classList.remove('run-ok', 'run-fail');
+
+  // Insere ícone pulsante
+  const ind = document.createElement('span');
+  ind.className = 'run-indicator';
+  ind.textContent = '⚡';
+  ind.title = 'Executando agora';
+  block.querySelector('.block-actions').prepend(ind);
+
+  // Scroll suave até o bloco no canvas
+  block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function markStepResult(toolName, passed) {
+  const block = document.querySelector(`#dropZone .flow-block[data-tool="${toolName}"]`);
+  if (!block) return;
+  block.classList.remove('running-now', 'run-ok', 'run-fail');
+  block.classList.add(passed ? 'run-ok' : 'run-fail');
+  const ind = block.querySelector('.run-indicator');
+  if (ind) { ind.textContent = passed ? '✓' : '✗'; ind.style.animation = 'none'; }
+}
+
+function clearStepHighlights() {
+  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
+    block.classList.remove('running-now', 'run-ok', 'run-fail');
+    const ind = block.querySelector('.run-indicator');
+    if (ind) ind.remove();
+  });
 }
 
 function appendLine(text, cls = '', toolLink = null) {
@@ -825,6 +882,12 @@ function finishRun(code) {
   runBtn.classList.remove('running');
   runBtn.innerHTML = '&#9654; Executar';
   cancelBtn.classList.remove('visible');
+  // Remove o ícone pulsante de qualquer bloco ainda com running-now
+  document.querySelectorAll('#dropZone .flow-block.running-now').forEach(b => {
+    b.classList.remove('running-now');
+    const ind = b.querySelector('.run-indicator');
+    if (ind) ind.remove();
+  });
 
   if (code === null) return;
   if (code === 0) {

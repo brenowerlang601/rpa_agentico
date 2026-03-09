@@ -7,6 +7,7 @@ Interface web para gerenciar workflows RPA.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -67,7 +68,12 @@ def _all_workflows() -> list[dict]:
 def _preview_script(workflow_name: str, steps: list[str]) -> str:
     """Gera preview do script de teste para uma sequência de steps."""
     import_lines = "\n".join(f"from tools.{s} import {s}" for s in steps)
-    result_lines = "\n".join(f"        results[{s!r}] = await {s}(page)" for s in steps)
+    result_lines = "\n".join(
+        f"        print('__RUNNING__{s}', flush=True)\n"
+        f"        sys.stdout.flush()\n"
+        f"        results[{s!r}] = await {s}(page)"
+        for s in steps
+    )
     return f"""\
 import asyncio
 import sys
@@ -325,14 +331,17 @@ def api_run():
 
     def generate():
         global _active_proc
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
         try:
             proc = subprocess.Popen(
-                [str(python_bin), str(tmp_path)],
+                [str(python_bin), "-u", str(tmp_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 cwd=str(Path(__file__).parent),
+                env=env,
             )
             with _active_proc_lock:
                 _active_proc = proc
