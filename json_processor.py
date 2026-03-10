@@ -386,7 +386,6 @@ def process_json(json_path: Path) -> None:
 
     existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
     save_tools(named, TOOLS_DIR, existing)
-    save_test_script(workflow_name, named, TESTS_DIR)
 
     print(f"\n[json_processor] Concluido.")
 
