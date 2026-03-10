@@ -39,8 +39,8 @@ Regras obrigatórias:
 - Imprima `[OK] {func_name}` ou `[FAIL] {func_name}: N erro(s)` com detalhes
 - Conecte ao browser via CDP já estabelecida — `page` já está pronto, não crie browser
 - Para `navigation`: `await page.goto(url)` + `await page.wait_for_load_state('networkidle')`
-- Para `fill`: clique no locator + `await locator.fill(valor)` — use cssSelector se disponível, senão xpath
-- Para `click`: `await locator.click()` + `await page.wait_for_timeout(500)`
+- Para `fill`: `await locator.wait_for(state='visible', timeout=10000)` + clique no locator + `await locator.fill(valor)` — use cssSelector se disponível, senão xpath
+- Para `click`: `await locator.wait_for(state='visible', timeout=10000)` + `await locator.click()` + `await page.wait_for_timeout(500)`
 - Para `key_press` com count=1: `await page.keyboard.press(key)` + `await page.wait_for_timeout(150)`
 - Para `key_press` com count>1: `for _ in range(count): await page.keyboard.press(key); await page.wait_for_timeout(150)`
 - Para xpath que começa sem `//`: adicione `//` no início
