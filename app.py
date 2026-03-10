@@ -35,6 +35,10 @@ JSON_RPA_DIR.mkdir(exist_ok=True)
 _active_proc: subprocess.Popen | None = None
 _active_proc_lock = threading.Lock()
 
+# Revisão de tools: canal de comunicação entre o SSE de geração e a resposta do usuário
+_review_event = threading.Event()
+_review_response: dict | None = None  # {"action": "approve"|"reject"|"revise", "feedback": str}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -161,19 +165,11 @@ def api_load_json():
     existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
     steps = resolve_tool_names(named, TOOLS_DIR, existing)
 
-    def _generate_tools():
-        try:
-            process_json(dest)
-        except Exception as e:
-            print(f"[load-json] Erro ao gerar tools: {e}")
-
-    t = threading.Thread(target=_generate_tools, daemon=True)
-    t.start()
-
     return jsonify({
         "workflow_name": workflow_name,
         "workflow_slug": _slug(workflow_name),
         "steps": steps,
+        "named_steps": [{"tool_name": s["tool_name"], "actions": s["actions"]} for s in named],
         "tools": _all_tools(),
     })
 
@@ -276,19 +272,11 @@ def api_upload():
     existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
     steps = resolve_tool_names(named, TOOLS_DIR, existing)
 
-    def _generate_tools():
-        try:
-            process_json(dest)
-        except Exception as e:
-            print(f"[upload] Erro ao gerar tools: {e}")
-
-    t = threading.Thread(target=_generate_tools, daemon=True)
-    t.start()
-
     return jsonify({
         "workflow_name": workflow_name,
         "workflow_slug": _slug(workflow_name),
         "steps": steps,
+        "named_steps": [{"tool_name": s["tool_name"], "actions": s["actions"]} for s in named],
         "tools": _all_tools(),
     })
 
@@ -402,6 +390,119 @@ def api_run_cancel():
         proc.terminate()
         return jsonify({"ok": True, "message": "Execução cancelada"})
     return jsonify({"ok": False, "message": "Nenhuma execução em andamento"})
+
+
+@app.route("/api/generate-tools", methods=["POST"])
+def api_generate_tools():
+    """
+    Gera tools via LLM com aprovação interativa via SSE.
+    Para cada tool nova, envia __REVIEW__<name> + código e aguarda resposta do usuário.
+    O usuário responde via /api/review-response com approve/reject/revise.
+    """
+    global _review_event, _review_response
+
+    from json_processor import _actions_fingerprint, _read_tool_fingerprint, resolve_tool_names
+    from tool_generator import _build_prompt, _call_llm, _save_tool
+
+    data = request.json
+    filename = data.get("filename", "")
+    named_steps = data.get("named_steps")  # [{tool_name, actions}]
+
+    # Suporte a passar filename OU named_steps diretamente
+    if filename:
+        dest = JSON_RPA_DIR / filename
+        if not dest.exists():
+            return jsonify({"error": "Arquivo não encontrado"}), 404
+        raw = json.loads(dest.read_text(encoding="utf-8"))
+        from json_processor import group_steps, name_steps
+        grouped = group_steps(raw.get("steps", []))
+        named_steps = name_steps(grouped)
+
+    if not named_steps:
+        return jsonify({"error": "Nenhum step para processar"}), 400
+
+    existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
+    resolve_tool_names(named_steps, TOOLS_DIR, existing)  # muta tool_name com _v2 etc.
+
+    def generate():
+        global _review_event, _review_response
+
+        for step in named_steps:
+            name = step["tool_name"]
+            actions = step["actions"]
+            new_fp = _actions_fingerprint(actions)
+
+            # Verifica se já existe com fingerprint idêntico
+            tool_path = TOOLS_DIR / f"{name}.py"
+            if tool_path.exists():
+                existing_fp = _read_tool_fingerprint(tool_path)
+                if existing_fp == new_fp:
+                    yield f"data: __SKIP__{name}\n\n"
+                    continue
+
+            # Gera código via LLM
+            yield f"data: __GENERATING__{name}\n\n"
+            prompt = _build_prompt(name, actions)
+            code = _call_llm(prompt)
+
+            # Entra no loop de revisão
+            feedback_history = []
+            while True:
+                # Manda código para o frontend revisar
+                # Formato: __REVIEW__<name>\n<code completo>
+                payload = json.dumps({"name": name, "code": code})
+                yield f"data: __REVIEW__{payload}\n\n"
+
+                # Aguarda resposta do usuário (timeout de 10 min)
+                _review_event.clear()
+                _review_response = None
+                got = _review_event.wait(timeout=600)
+
+                if not got or _review_response is None:
+                    yield f"data: __REVIEW_TIMEOUT__{name}\n\n"
+                    break
+
+                action = _review_response.get("action")
+                feedback = _review_response.get("feedback", "").strip()
+
+                if action == "approve":
+                    _save_tool(name, code, fingerprint=new_fp)
+                    yield f"data: __APPROVED__{name}\n\n"
+                    break
+                elif action == "reject":
+                    tool_path = TOOLS_DIR / f"{name}.py"
+                    if tool_path.exists():
+                        tool_path.unlink()
+                    yield f"data: __REJECTED__{name}\n\n"
+                    yield "data: __GENERATE_DONE__\n\n"
+                    return
+                elif action == "revise":
+                    yield f"data: __REVISING__{name}\n\n"
+                    feedback_history.append(feedback)
+                    # Regera com feedback acumulado
+                    revision_note = "\n".join(
+                        f"- {fb}" for fb in feedback_history
+                    )
+                    revised_prompt = (
+                        prompt
+                        + f"\n\nO usuário pediu as seguintes revisões (aplique TODAS):\n{revision_note}"
+                    )
+                    code = _call_llm(revised_prompt)
+                    # Volta ao topo do while para nova revisão
+
+        yield "data: __GENERATE_DONE__\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/review-response", methods=["POST"])
+def api_review_response():
+    """Recebe a resposta do usuário para uma tool em revisão."""
+    global _review_event, _review_response
+    _review_response = request.json  # {action, feedback}
+    _review_event.set()
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

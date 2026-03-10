@@ -127,6 +127,21 @@
     .confirm-bar { background: #2d1a1a; border: 1px solid #c53030; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
     .confirm-bar span { flex: 1; color: #fc8181; }
 
+    /* Modal de revisão de tool */
+    #reviewModal .modal { width: 860px; max-height: 92vh; }
+    #reviewModal .modal-body { overflow: hidden; }
+    #reviewModal .CodeMirror { height: 380px; font-size: 12px; }
+    .review-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid #2d3748; background: #141622; }
+    .review-toolbar .review-label { font-size: 12px; color: #718096; flex: 1; }
+    #reviewFeedback { flex: 1; background: #1e2235; border: 1px solid #4a5568; border-radius: 6px; padding: 6px 10px; font-size: 13px; color: #e2e8f0; outline: none; display: none; }
+    #reviewFeedback.visible { display: block; }
+    .btn-approve { background: #065f46; color: #6ee7b7; border: 1px solid #059669; }
+    .btn-approve:hover { background: #047857; }
+    .btn-reject { background: #7f1d1d; color: #fca5a5; border: 1px solid #c53030; }
+    .btn-reject:hover { background: #991b1b; }
+    .btn-revise { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
+    .btn-revise:hover { background: #1d4ed8; }
+
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
   </style>
 </head>
@@ -199,6 +214,26 @@
 </div>
 
 </div><!-- /.workspace -->
+
+<!-- MODAL: revisão de tool gerada pelo LLM -->
+<div class="modal-overlay hidden" id="reviewModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="reviewTitle">Revisar tool gerada</span>
+      <span style="font-size:12px; color:#718096; margin-left:8px;" id="reviewCounter"></span>
+    </div>
+    <div class="modal-body">
+      <div id="reviewEditorContainer"></div>
+    </div>
+    <div class="review-toolbar">
+      <span class="review-label" id="reviewStatusLabel">Revise o código gerado e escolha uma ação:</span>
+      <input id="reviewFeedback" type="text" placeholder="Descreva a ressalva ou correção desejada..." />
+      <button class="btn btn-revise btn-sm" onclick="submitRevise()">↩ Ressalva</button>
+      <button class="btn btn-reject btn-sm" onclick="submitReview('reject')">✕ Rejeitar</button>
+      <button class="btn btn-approve btn-sm" onclick="submitReview('approve')">✓ Aprovar</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL: editor de código da tool -->
 <div class="modal-overlay hidden" id="editorModal">
@@ -632,28 +667,153 @@ function doUpload(file) {
       pendingSteps = new Set(data.steps);
       renderFlow();
       refreshPreview();
-      toast(`${data.steps.length} steps identificados. Gerando tools em background...`, 'ok');
-      pollTools(data.steps, 0);
+      startToolGeneration(data.named_steps);
     })
     .catch(() => toast('Erro ao processar o arquivo', 'err'));
 }
 
-function pollTools(expectedSteps, attempts) {
-  if (attempts > 30) return;
-  setTimeout(() => {
+// ─── Geração interativa de tools ──────────────────────────────────────────────
+
+let _reviewCM = null;
+let _reviewResolve = null; // resolve da Promise aguardando resposta do usuário
+
+function startToolGeneration(namedSteps) {
+  if (!namedSteps || namedSteps.length === 0) return;
+  const newTools = namedSteps.filter(s => !allTools.find(t => t.name === s.tool_name));
+  if (newTools.length === 0) {
+    pendingSteps.clear();
+    renderFlow();
+    toast('Todas as tools já existem.', 'ok');
+    return;
+  }
+  toast(`Gerando ${newTools.length} tool(s) — aguardando aprovação...`, 'ok');
+
+  fetch('/api/generate-tools', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ named_steps: namedSteps }),
+  }).then(response => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    function read() {
+      reader.read().then(({ done, value }) => {
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          const line = part.slice(6);
+          handleGenerationEvent(line);
+        }
+        read();
+      });
+    }
+    read();
+  }).catch(e => toast(`Erro na geração: ${e}`, 'err'));
+}
+
+function handleGenerationEvent(line) {
+  if (line.startsWith('__GENERATING__')) {
+    const name = line.slice('__GENERATING__'.length);
+    toast(`Gerando: ${name}...`, 'ok');
+
+  } else if (line.startsWith('__REVIEW__')) {
+    const payload = JSON.parse(line.slice('__REVIEW__'.length));
+    openReviewModal(payload.name, payload.code);
+
+  } else if (line.startsWith('__SKIP__')) {
+    const name = line.slice('__SKIP__'.length);
+    pendingSteps.delete(name);
+    renderFlow();
+    updatePendingBadges();
+
+  } else if (line.startsWith('__APPROVED__')) {
+    const name = line.slice('__APPROVED__'.length);
+    closeReviewModal();
+    pendingSteps.delete(name);
     fetch('/api/tools').then(r => r.json()).then(tools => {
       allTools = tools;
       renderLibrary();
-      const generated = tools.map(t => t.name);
-      const pending = expectedSteps.filter(s => !generated.includes(s));
-      if (pending.length === 0) {
-        pendingSteps.clear();
-        toast('Todas as tools geradas com sucesso!', 'ok');
-      } else {
-        pollTools(expectedSteps, attempts + 1);
-      }
+      renderFlow();
+      updatePendingBadges();
+      toast(`✓ Tool aprovada: ${name}`, 'ok');
     });
-  }, 10000);
+
+  } else if (line.startsWith('__REJECTED__')) {
+    const name = line.slice('__REJECTED__'.length);
+    closeReviewModal();
+    pendingSteps.delete(name);
+    flowSteps = flowSteps.filter(s => s !== name);
+    allTools = allTools.filter(t => t.name !== name);
+    renderLibrary();
+    renderFlow();
+    refreshPreview();
+    toast(`✕ Tool rejeitada e removida: ${name}`, 'err');
+
+  } else if (line.startsWith('__REVISING__')) {
+    const name = line.slice('__REVISING__'.length);
+    document.getElementById('reviewStatusLabel').textContent = `Regerando ${name} com sua ressalva...`;
+    document.getElementById('reviewFeedback').classList.remove('visible');
+    document.getElementById('reviewFeedback').value = '';
+
+  } else if (line === '__GENERATE_DONE__') {
+    pendingSteps.clear();
+    renderFlow();
+    updatePendingBadges();
+    toast('Geração concluída!', 'ok');
+  }
+}
+
+function openReviewModal(name, code) {
+  document.getElementById('reviewTitle').textContent = `Revisar tool: ${name}`;
+  document.getElementById('reviewStatusLabel').textContent = 'Revise o código gerado e escolha uma ação:';
+  document.getElementById('reviewFeedback').classList.remove('visible');
+  document.getElementById('reviewFeedback').value = '';
+
+  const container = document.getElementById('reviewEditorContainer');
+  container.innerHTML = '';
+  const textarea = document.createElement('textarea');
+  container.appendChild(textarea);
+  textarea.value = code;
+
+  if (_reviewCM) { _reviewCM.toTextArea(); _reviewCM = null; }
+  _reviewCM = CodeMirror.fromTextArea(textarea, {
+    mode: 'python', theme: 'dracula', lineNumbers: true,
+    indentUnit: 4, tabSize: 4, lineWrapping: false, readOnly: false,
+  });
+  setTimeout(() => _reviewCM.refresh(), 50);
+
+  document.getElementById('reviewModal').classList.remove('hidden');
+}
+
+function closeReviewModal() {
+  document.getElementById('reviewModal').classList.add('hidden');
+  if (_reviewCM) { _reviewCM.toTextArea(); _reviewCM = null; }
+}
+
+function submitReview(action) {
+  const feedback = document.getElementById('reviewFeedback').value.trim();
+  fetch('/api/review-response', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, feedback }),
+  });
+  // A UI será atualizada quando chegar o evento SSE de resposta (__APPROVED__ / __REJECTED__)
+}
+
+function submitRevise() {
+  const feedback = document.getElementById('reviewFeedback').value.trim();
+  if (!feedback) {
+    // Mostra o campo se ainda não estava visível
+    const fb = document.getElementById('reviewFeedback');
+    fb.classList.add('visible');
+    fb.focus();
+    return;
+  }
+  submitReview('revise');
 }
 
 // Drag-and-drop de arquivo na área de upload
@@ -701,10 +861,10 @@ function loadJsonFile(filename) {
     if (data.error) { toast(data.error, 'err'); return; }
     document.getElementById('workflowName').value = data.workflow_name;
     flowSteps = data.steps;
+    pendingSteps = new Set(data.steps);
     renderFlow();
     refreshPreview();
-    toast(`${data.steps.length} steps carregados. Gerando tools em background...`, 'ok');
-    pollTools(data.steps, 0);
+    startToolGeneration(data.named_steps);
   }).catch(() => toast('Erro ao carregar o arquivo', 'err'));
 }
 
