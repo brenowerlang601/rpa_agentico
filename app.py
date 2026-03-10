@@ -111,20 +111,8 @@ async def run():
 
 {result_lines}
 
-        print()
-        print("=" * 50)
-        print(f"Relatório QA — {workflow_name}")
-        print("=" * 50)
-        passed = [k for k, v in results.items() if v]
         failed = [k for k, v in results.items() if not v]
-        for step in passed:
-            print(f"  [PASS] {{step}}")
-        for step in failed:
-            err = errors.get(step, "retornou False")
-            print(f"  [FAIL] {{step}}: {{err}}")
-        print("-" * 50)
-        print(f"  Total: {{len(results)}} | Passed: {{len(passed)}} | Failed: {{len(failed)}}")
-        print("=" * 50)
+        print("true" if not failed else "false")
         sys.exit(0 if not failed else 1)
 
 
