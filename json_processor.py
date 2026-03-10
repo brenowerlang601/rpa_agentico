@@ -80,6 +80,10 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
 
         if atype == "key_press":
             key = _normalize_key(action.get("key", ""))
+            # Ignora atalhos de copiar/colar — não fazem sentido em automação
+            if action.get("key", "") in ("CmdOrCtrl+C", "CmdOrCtrl+V"):
+                i += 1
+                continue
             url = action.get("url", "")
             xpath = action.get("xpath", "")
             css = action.get("cssSelector", "")

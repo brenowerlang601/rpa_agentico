@@ -1,83 +1,53 @@
-# actions_fp: f4391dd6f347
+# actions_fp: 0e54ab1cda28
 from playwright.async_api import Page
 
 async def fazer_login_forms_v2(page) -> bool:
-    errors = []
+    errors: list[tuple[str, str]] = []
 
+    # Primeira ação: fill
     try:
-        # Navegar para a URL
-        await page.goto("https://erp.systextil.com.br/systextil/forms.systextil.senha.nxj?managerId=AMAN16_UAcy8hgmbMO7Ks-KbDpnPUd#0x")
+        await page.goto("https://erp.systextil.com.br/systextil/")
         await page.wait_for_load_state('networkidle')
+        locator = page.locator('//*[@id="box1."]/div[3]/input')  # Campo USUÁRIO
+        await locator.click()
+        await locator.fill("INTERSYS")
     except Exception as e:
-        errors.append(("navigation", str(e)))
+        errors.append(("fill", str(e)))
 
+    # Segunda ação: click
     try:
-        # Preencher o campo USUÁRIO
-        usuario_locator = page.locator("//id(\"box1.\")/div[3]/input[1]")
-        await usuario_locator.click()
-        await usuario_locator.fill("INTERSYS")
-    except Exception as e:
-        errors.append(("fill USUÁRIO", str(e)))
-
-    try:
-        # Clicar no campo USUÁRIO
-        await usuario_locator.click()
+        locator = page.locator('//*[@id="box1."]/div[3]/input')  # Campo USUÁRIO
+        await locator.click()
         await page.wait_for_timeout(500)
     except Exception as e:
-        errors.append(("click USUÁRIO", str(e)))
+        errors.append(("click", str(e)))
 
+    # Terceira ação: click
     try:
-        # Clicar novamente no campo USUÁRIO
-        await usuario_locator.click()
+        locator = page.locator('//*[@id="box1."]/div[3]/input')  # Campo USUÁRIO
+        await locator.click()
         await page.wait_for_timeout(500)
     except Exception as e:
-        errors.append(("second click USUÁRIO", str(e)))
+        errors.append(("click", str(e)))
 
+    # Quarta ação: fill
     try:
-        # Pressionar Control+C
-        await page.keyboard.press("Control+c")
-        await page.wait_for_timeout(150)
+        locator = page.locator('//*[@id="box1."]/div[3]/input')  # Campo USUÁRIO
+        await locator.click()
+        await locator.fill("INTERSYS")
     except Exception as e:
-        errors.append(("key_press Control+c", str(e)))
+        errors.append(("fill", str(e)))
 
+    # Quinta ação: fill
     try:
-        # Clicar de novo no campo USUÁRIO
-        await usuario_locator.click()
-        await page.wait_for_timeout(500)
+        locator = page.locator('//*[@id="box1."]/div[3]/input')  # Campo USUÁRIO
+        await locator.click()
+        await locator.fill("INTERSYSINTERSYS")
     except Exception as e:
-        errors.append(("third click USUÁRIO", str(e)))
-
-    try:
-        # Pressionar Control+V
-        await page.keyboard.press("Control+v")
-        await page.wait_for_timeout(150)
-    except Exception as e:
-        errors.append(("key_press Control+v", str(e)))
-
-    try:
-        # Preencher o campo USUÁRIO com INTERSYSINTERSYS
-        await usuario_locator.click()
-        await usuario_locator.fill("INTERSYSINTERSYS")
-    except Exception as e:
-        errors.append(("second fill USUÁRIO", str(e)))
-
-    try:
-        # Pressionar Control+V duas vezes
-        for _ in range(2):
-            await page.keyboard.press("Control+v")
-            await page.wait_for_timeout(150)
-    except Exception as e:
-        errors.append(("key_press Control+v x2", str(e)))
-
-    try:
-        # Preencher o campo USUÁRIO com INTERSYSINTERSYSINTERSYSINTERSYS
-        await usuario_locator.click()
-        await usuario_locator.fill("INTERSYSINTERSYSINTERSYSINTERSYS")
-    except Exception as e:
-        errors.append(("third fill USUÁRIO", str(e)))
+        errors.append(("fill", str(e)))
 
     if errors:
-        print(f"[FAIL] fazer_login_forms_v2: {len(errors)} erro(s): {errors}")
+        print(f"[FAIL] fazer_login_forms_v2: {len(errors)} erro(s) {errors}")
         return False
     else:
         print("[OK] fazer_login_forms_v2")
