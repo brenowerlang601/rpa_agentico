@@ -1,5 +1,7 @@
 from playwright.async_api import Page
  
+import asyncio    
+    
 async def preencher_forms_2(page) -> bool:
     errors = []
  
@@ -109,11 +111,15 @@ async def preencher_forms_2(page) -> bool:
         await locator.fill("2540")
     except Exception as e:
         errors.append(("fill cd_it_pe_item.", str(e)))
+        
+    await asyncio.sleep(0.5)
     try:
         await page.keyboard.press("F9")
         await page.wait_for_timeout(150)
     except Exception as e:
         errors.append(("key_press Enter tecido_peca.", str(e)))
+        
+    await asyncio.sleep(0.5)
     try:
         await page.keyboard.press("F1")
         await page.wait_for_timeout(150)

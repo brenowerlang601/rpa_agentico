@@ -29,6 +29,22 @@
     .workspace { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
     .main { display: flex; flex: 1; overflow: hidden; }
 
+    /* MODO TESTE */
+    body.test-mode header .hide-in-test { display: none; }
+    body.test-mode header { gap: 10px; }
+    body.test-mode .sidebar { display: none; }
+    body.test-mode .preview-panel { display: none; }
+    body.test-mode .canvas-header { display: none; }
+    body.test-mode .workspace { flex-direction: row; }
+    body.test-mode .main { flex: 1; min-width: 0; }
+    body.test-mode .canvas-area { border-right: 1px solid #2d3748; }
+    body.test-mode .terminal-panel { width: 55%; flex-shrink: 0; border-top: none; border-left: 1px solid #2d3748; height: auto !important; overflow: hidden; display: flex; flex-direction: column; }
+    body.test-mode .terminal-panel.open { height: auto !important; }
+    body.test-mode .terminal-output { flex: 1; }
+    .btn-test-mode { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
+    .btn-test-mode:hover { background: #1d4ed8; opacity: 1; }
+    .btn-test-mode.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+
     /* TERMINAL */
     .terminal-panel { background: #0a0c14; border-top: 1px solid #2d3748; flex-shrink: 0; display: flex; flex-direction: column; transition: height .2s; height: 0; overflow: hidden; }
     .terminal-panel.open { height: 220px; }
@@ -148,11 +164,12 @@
 <body>
 
 <header>
-  <h1>RPA Workflow Editor</h1>
-  <input class="workflow-name-input" id="workflowName" type="text" placeholder="Nome do workflow..." value="Novo Workflow" />
+  <h1 class="hide-in-test">RPA Workflow Editor</h1>
+  <input class="workflow-name-input hide-in-test" id="workflowName" type="text" placeholder="Nome do workflow..." value="Novo Workflow" />
   <div class="header-sep"></div>
-  <button class="btn btn-outline btn-sm" onclick="loadWorkflow()">Carregar fluxo...</button>
-  <button class="btn btn-success" onclick="saveWorkflow()">Salvar script</button>
+  <button class="btn btn-outline btn-sm hide-in-test" onclick="loadWorkflow()">Carregar fluxo...</button>
+  <button class="btn btn-success hide-in-test" onclick="saveWorkflow()">Salvar script</button>
+  <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()">⬡ Modo Teste</button>
   <button class="btn btn-run" id="runBtn" onclick="runWorkflow()">&#9654; Executar</button>
   <button class="btn btn-cancel" id="cancelBtn" onclick="cancelRun()">&#9632; Cancelar</button>
 </header>
@@ -1000,6 +1017,19 @@ function cancelRun() {
       appendLine('[CANCELADO] Execução interrompida pelo usuário', 'fail');
       finishRun(1);
     });
+}
+
+function toggleTestMode() {
+  const isActive = document.body.classList.toggle('test-mode');
+  const btn = document.getElementById('testModeBtn');
+  btn.classList.toggle('active', isActive);
+  btn.textContent = isActive ? '✕ Sair do Modo Teste' : '⬡ Modo Teste';
+
+  // No modo teste abre o terminal automaticamente
+  const panel = document.getElementById('terminalPanel');
+  if (isActive) {
+    panel.classList.add('open');
+  }
 }
 
 function renderLine(line) {
