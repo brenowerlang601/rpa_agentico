@@ -313,6 +313,33 @@ def _read_tool_fingerprint(tool_path: Path) -> str | None:
     return None
 
 
+def resolve_tool_names(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]) -> list[str]:
+    """
+    Resolve os nomes finais das tools (com sufixo _v2, _v3 se necessário)
+    sem gerar nada via LLM. Muta step["tool_name"] igual ao save_tools.
+    Retorna lista de nomes resolvidos.
+    """
+    resolved = []
+    for step in named_steps:
+        base_name = step["tool_name"]
+        actions = step["actions"]
+        new_fp = _actions_fingerprint(actions)
+
+        candidate = base_name
+        version = 2
+        while candidate in existing_tools:
+            tool_path = tools_dir / f"{candidate}.py"
+            existing_fp = _read_tool_fingerprint(tool_path)
+            if existing_fp == new_fp:
+                break
+            candidate = f"{base_name}_v{version}"
+            version += 1
+
+        step["tool_name"] = candidate
+        resolved.append(candidate)
+    return resolved
+
+
 def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]):
     """
     Gera tools para cada micro-processo via LLM (tool_generator).

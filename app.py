@@ -23,6 +23,7 @@ from json_processor import (
     group_steps,
     name_steps,
     process_json,
+    resolve_tool_names,
     save_test_script,
 )
 
@@ -157,7 +158,8 @@ def api_load_json():
     raw_steps = data.get("steps", [])
     grouped = group_steps(raw_steps)
     named = name_steps(grouped)
-    steps = [s["tool_name"] for s in named]
+    existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
+    steps = resolve_tool_names(named, TOOLS_DIR, existing)
 
     def _generate_tools():
         try:
@@ -271,7 +273,8 @@ def api_upload():
     raw_steps = data.get("steps", [])
     grouped = group_steps(raw_steps)
     named = name_steps(grouped)
-    steps = [s["tool_name"] for s in named]
+    existing = {p.stem for p in TOOLS_DIR.glob("*.py") if p.stem != "__init__"}
+    steps = resolve_tool_names(named, TOOLS_DIR, existing)
 
     def _generate_tools():
         try:
