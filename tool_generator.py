@@ -84,8 +84,9 @@ def _call_llm(prompt: str) -> str:
     return code
 
 
-def _save_tool(func_name: str, func_code: str) -> Path:
-    header = "from playwright.async_api import Page\n\n"
+def _save_tool(func_name: str, func_code: str, fingerprint: str = "") -> Path:
+    fp_comment = f"# actions_fp: {fingerprint}\n" if fingerprint else ""
+    header = f"{fp_comment}from playwright.async_api import Page\n\n"
     tool_path = TOOLS_DIR / f"{func_name}.py"
     tool_path.write_text(header + func_code, encoding="utf-8")
     print(f"[tool_generator] Salvo: {tool_path}")
@@ -96,7 +97,7 @@ def _save_tool(func_name: str, func_code: str) -> Path:
 # API pública
 # ---------------------------------------------------------------------------
 
-def generate_tool_from_actions(func_name: str, actions: list[dict]) -> Path:
+def generate_tool_from_actions(func_name: str, actions: list[dict], fingerprint: str = "") -> Path:
     """
     Gera uma tool Playwright a partir de ações normalizadas do JSON.
     O LLM recebe a lista completa e deve gerar um bloco por ação.
@@ -104,7 +105,7 @@ def generate_tool_from_actions(func_name: str, actions: list[dict]) -> Path:
     print(f"[tool_generator] Gerando '{func_name}' com {len(actions)} ações via LLM...")
     prompt = _build_prompt(func_name, actions)
     code = _call_llm(prompt)
-    return _save_tool(func_name, code)
+    return _save_tool(func_name, code, fingerprint=fingerprint)
 
 
 async def generate_tool_from_agent_result(task_name: str, result) -> Path:

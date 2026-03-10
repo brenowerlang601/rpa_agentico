@@ -4,6 +4,7 @@ Processa um JSON de fluxo RPA (json_rpa/) e gera:
 2. Script de teste Playwright completo (tests/<nome>.py)
 """
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -275,25 +276,77 @@ def name_steps(grouped: list[dict]) -> list[dict]:
 # Saída: tools individuais — delegada ao tool_generator (LLM)
 # ---------------------------------------------------------------------------
 
+def _actions_fingerprint(actions: list[dict]) -> str:
+    """
+    Gera um fingerprint hash das ações normalizadas.
+    Usa tipo + xpath/css + valor para identificar unicamente o conjunto de ações.
+    """
+    key_parts = []
+    for a in actions:
+        parts = [
+            a.get("type", ""),
+            a.get("xpath", ""),
+            a.get("css_selector", ""),
+            a.get("value", ""),
+            a.get("key", ""),
+            str(a.get("count", 1)),
+            a.get("url", ""),
+        ]
+        key_parts.append("|".join(parts))
+    raw = "::".join(key_parts)
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+def _read_tool_fingerprint(tool_path: Path) -> str | None:
+    """Lê o fingerprint salvo no cabeçalho da tool (comentário # actions_fp: <hash>)."""
+    try:
+        first_lines = tool_path.read_text(encoding="utf-8").splitlines()[:3]
+        for line in first_lines:
+            if line.startswith("# actions_fp:"):
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+
 def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]):
     """
     Gera tools para cada micro-processo via LLM (tool_generator).
-    O LLM recebe a lista completa de ações e gera o código Python garantindo
-    que nenhum passo seja omitido.
-    Não sobrescreve tools já existentes.
+    Compara fingerprint das ações com a tool existente:
+    - Se fingerprint igual: reutiliza (mesmo comportamento)
+    - Se fingerprint diferente: gera nova tool com sufixo _v2, _v3, etc.
     """
     from tool_generator import generate_tool_from_actions
 
     saved = []
-    for step in named_steps:
-        name = step["tool_name"]
-        if name in existing_tools:
-            print(f"  [skip] tool já existe: {name}.py")
-            saved.append(name)
-            continue
 
-        generate_tool_from_actions(name, step["actions"])
-        saved.append(name)
+    for step in named_steps:
+        base_name = step["tool_name"]
+        actions = step["actions"]
+        new_fp = _actions_fingerprint(actions)
+
+        # Encontra o nome final da tool (pode ser base_name ou base_name_v2, etc.)
+        candidate = base_name
+        version = 2
+        while candidate in existing_tools:
+            tool_path = tools_dir / f"{candidate}.py"
+            existing_fp = _read_tool_fingerprint(tool_path)
+            if existing_fp == new_fp:
+                # Mesmo comportamento — reutiliza
+                print(f"  [skip] tool idêntica já existe: {candidate}.py")
+                break
+            # Ações diferentes — tenta próxima versão
+            print(f"  [diff] ações diferentes de '{candidate}' (fp={new_fp[:6]}≠{(existing_fp or '?')[:6]}) → tentando versão {version}")
+            candidate = f"{base_name}_v{version}"
+            version += 1
+        else:
+            # candidate não existe — gera nova tool com fingerprint no cabeçalho
+            generate_tool_from_actions(candidate, actions, fingerprint=new_fp)
+
+        # Garante que o nome usado vá para o step (pode ter mudado para _v2 etc.)
+        step["tool_name"] = candidate
+        saved.append(candidate)
+
     return saved
 
 
