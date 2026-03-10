@@ -86,6 +86,11 @@
     .flow-block .block-btn { background: none; border: none; color: #4a5568; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
     .flow-block .block-btn:hover { color: #a78bfa; background: #2d3748; }
     .flow-block .block-btn.remove:hover { color: #fc8181; }
+    .flow-block .block-btn.bp { font-size: 12px; }
+    .flow-block .block-btn.bp:hover { color: #f6ad55; background: #2d3748; }
+    .flow-block.has-breakpoint { border-left: 3px solid #e53e3e; }
+    .flow-block.has-breakpoint .block-btn.bp { color: #e53e3e; }
+    .flow-block.has-breakpoint .step-num::before { content: '●'; color: #e53e3e; font-size: 8px; display: block; line-height: 1; }
     .empty-hint { text-align: center; color: #4a5568; font-size: 13px; padding: 40px 20px; }
 
     /* PREVIEW */
@@ -313,6 +318,7 @@
 let allTools = [];        // [{name, code}]
 let flowSteps = [];       // [toolName, ...]
 let pendingSteps = new Set(); // tools ainda sendo geradas
+let breakpointStep = null;    // nome da tool onde a execução deve parar
 let currentEditTool = null;
 let renamingTool = null;
 let editorCM = null;
@@ -433,6 +439,7 @@ function renderFlow() {
       <span class="step-name">${name}</span>
       ${isPending ? '<span class="step-badge">gerando...</span>' : ''}
       <div class="block-actions">
+        <button class="block-btn bp" title="Parar antes deste step (breakpoint)" onclick="toggleBreakpoint('${name}', event)">⬤</button>
         <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)" ${isPending ? 'disabled style="opacity:.4"' : ''}>✎</button>
         <button class="block-btn remove" title="Remover" onclick="removeStep(${idx})">✕</button>
       </div>
@@ -754,6 +761,18 @@ function confirmSave() {
 }
 
 // ─── Execução via SSE ─────────────────────────────────────────────────────────
+function toggleBreakpoint(name, e) {
+  e.stopPropagation();
+  // Desmarca se clicar no mesmo
+  breakpointStep = breakpointStep === name ? null : name;
+  // Atualiza visual de todos os blocos
+  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
+    block.classList.toggle('has-breakpoint', block.dataset.tool === breakpointStep);
+  });
+  if (breakpointStep) toast(`Breakpoint em: ${breakpointStep}`, 'ok');
+  else toast('Breakpoint removido', 'dim');
+}
+
 function runWorkflow() {
   if (flowSteps.length === 0) { toast('Nenhum step no fluxo', 'err'); return; }
 
@@ -782,7 +801,7 @@ function runWorkflow() {
   fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: name, steps: flowSteps }),
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep }),
   }).then(response => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -828,6 +847,13 @@ function renderLine(line) {
     const toolName = line.slice('__RUNNING__'.length).trim();
     highlightRunningStep(toolName);
     return; // não exibe no terminal
+  }
+  if (line.startsWith('__BREAKPOINT__')) {
+    const toolName = line.slice('__BREAKPOINT__'.length).trim();
+    appendLine('─'.repeat(44), 'sep');
+    appendLine(`⬤ Breakpoint — execução para antes de: ${toolName}`, 'fail');
+    appendLine('─'.repeat(44), 'sep');
+    return;
   }
   if (line.startsWith('[OK]')) appendLine(line, 'ok');
   else if (line.startsWith('[FAIL]') || line.startsWith('  - ')) appendLine(line, 'fail');
