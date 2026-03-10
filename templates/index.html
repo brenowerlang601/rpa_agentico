@@ -66,6 +66,9 @@
     .btn-run.running { background: #4a5568; cursor: not-allowed; }
     .btn-cancel { background: #c53030; color: #fff; display: none; }
     .btn-cancel.visible { display: inline; }
+    .btn-pause { background: #2d3748; color: #a0aec0; border: 1px solid #4a5568; display: none; }
+    .btn-pause.visible { display: inline; }
+    .btn-pause.paused { background: #744210; color: #fbd38d; border-color: #d97706; }
 
     /* SIDEBAR — biblioteca de tools */
     .sidebar { width: 260px; background: #141622; border-right: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
@@ -171,6 +174,7 @@
   <button class="btn btn-success hide-in-test" onclick="saveWorkflow()">Salvar script</button>
   <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()">⬡ Modo Teste</button>
   <button class="btn btn-run" id="runBtn" onclick="runWorkflow()">&#9654; Executar</button>
+  <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()">⏸ Pausar</button>
   <button class="btn btn-cancel" id="cancelBtn" onclick="cancelRun()">&#9632; Cancelar</button>
 </header>
 
@@ -971,6 +975,11 @@ function runWorkflow() {
   runBtn.classList.add('running');
   runBtn.textContent = '⏳ Executando';
   cancelBtn.classList.add('visible');
+  _isPaused = false;
+  const pauseBtn = document.getElementById('pauseBtn');
+  pauseBtn.classList.add('visible');
+  pauseBtn.classList.remove('paused');
+  pauseBtn.textContent = '⏸ Pausar';
 
   appendLine(`Iniciando fluxo: ${name}`, 'dim');
   appendLine('─'.repeat(44), 'sep');
@@ -1016,6 +1025,28 @@ function cancelRun() {
     .then(data => {
       appendLine('[CANCELADO] Execução interrompida pelo usuário', 'fail');
       finishRun(1);
+    });
+}
+
+let _isPaused = false;
+
+function togglePause() {
+  const btn = document.getElementById('pauseBtn');
+  const endpoint = _isPaused ? '/api/run/resume' : '/api/run/pause';
+  fetch(endpoint, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) return;
+      _isPaused = data.paused;
+      if (_isPaused) {
+        btn.classList.add('paused');
+        btn.textContent = '▶ Retomar';
+        appendLine('⏸ Execução pausada', 'dim');
+      } else {
+        btn.classList.remove('paused');
+        btn.textContent = '⏸ Pausar';
+        appendLine('▶ Execução retomada', 'dim');
+      }
     });
 }
 
@@ -1123,6 +1154,9 @@ function finishRun(code) {
   runBtn.classList.remove('running');
   runBtn.innerHTML = '&#9654; Executar';
   cancelBtn.classList.remove('visible');
+  const pauseBtnF = document.getElementById('pauseBtn');
+  pauseBtnF.classList.remove('visible', 'paused');
+  pauseBtnF.textContent = '⏸ Pausar';
   // Remove o ícone pulsante de qualquer bloco ainda com running-now
   document.querySelectorAll('#dropZone .flow-block.running-now').forEach(b => {
     b.classList.remove('running-now');

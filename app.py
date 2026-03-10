@@ -31,9 +31,10 @@ app = Flask(__name__)
 JSON_RPA_DIR = Path("json_rpa")
 JSON_RPA_DIR.mkdir(exist_ok=True)
 
-# Processo ativo de execução (para poder cancelar)
+# Processo ativo de execução (para poder cancelar/pausar)
 _active_proc: subprocess.Popen | None = None
 _active_proc_lock = threading.Lock()
+_active_proc_paused = False
 
 # Revisão de tools: canal de comunicação entre o SSE de geração e a resposta do usuário
 _review_event = threading.Event()
@@ -371,6 +372,7 @@ def api_run():
         finally:
             with _active_proc_lock:
                 _active_proc = None
+            _active_proc_paused = False
             try:
                 tmp_path.unlink()
             except Exception:
@@ -383,13 +385,49 @@ def api_run():
 @app.route("/api/run/cancel", methods=["POST"])
 def api_run_cancel():
     """Cancela o processo de execução em andamento."""
-    global _active_proc
+    global _active_proc, _active_proc_paused
     with _active_proc_lock:
         proc = _active_proc
     if proc and proc.poll() is None:
+        # Retoma antes de terminar, para evitar que fique preso em SIGSTOP
+        if _active_proc_paused:
+            import signal
+            try:
+                proc.send_signal(signal.SIGCONT)
+            except Exception:
+                pass
+            _active_proc_paused = False
         proc.terminate()
         return jsonify({"ok": True, "message": "Execução cancelada"})
     return jsonify({"ok": False, "message": "Nenhuma execução em andamento"})
+
+
+@app.route("/api/run/pause", methods=["POST"])
+def api_run_pause():
+    """Pausa o processo em andamento via SIGSTOP."""
+    global _active_proc, _active_proc_paused
+    import signal
+    with _active_proc_lock:
+        proc = _active_proc
+    if proc and proc.poll() is None and not _active_proc_paused:
+        proc.send_signal(signal.SIGSTOP)
+        _active_proc_paused = True
+        return jsonify({"ok": True, "paused": True})
+    return jsonify({"ok": False, "paused": _active_proc_paused})
+
+
+@app.route("/api/run/resume", methods=["POST"])
+def api_run_resume():
+    """Retoma o processo pausado via SIGCONT."""
+    global _active_proc, _active_proc_paused
+    import signal
+    with _active_proc_lock:
+        proc = _active_proc
+    if proc and proc.poll() is None and _active_proc_paused:
+        proc.send_signal(signal.SIGCONT)
+        _active_proc_paused = False
+        return jsonify({"ok": True, "paused": False})
+    return jsonify({"ok": False, "paused": _active_proc_paused})
 
 
 @app.route("/api/generate-tools", methods=["POST"])
