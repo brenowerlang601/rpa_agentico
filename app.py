@@ -73,10 +73,20 @@ def _all_workflows() -> list[dict]:
 def _preview_script(workflow_name: str, steps: list[str]) -> str:
     """Gera preview do script de teste para uma sequência de steps."""
     import_lines = "\n".join(f"from tools.{s} import {s}" for s in steps)
+    # Cada step é executado em try/except independente:
+    # - retorno True  → PASS
+    # - retorno False → FAIL
+    # - retorno None  → PASS (tool sem retorno explícito = não lançou exceção)
+    # - exceção       → FAIL com mensagem de erro
     result_lines = "\n".join(
         f"        print('__RUNNING__{s}', flush=True)\n"
         f"        sys.stdout.flush()\n"
-        f"        results[{s!r}] = await {s}(page)"
+        f"        try:\n"
+        f"            _r = await {s}(page)\n"
+        f"            results[{s!r}] = (_r is not False)\n"
+        f"        except Exception as _e:\n"
+        f"            results[{s!r}] = False\n"
+        f"            errors[{s!r}] = str(_e)"
         for s in steps
     )
     return f"""\
@@ -97,6 +107,7 @@ async def run():
         page = browser.contexts[0].pages[0]
 
         results: dict[str, bool] = {{}}
+        errors: dict[str, str] = {{}}
 
 {result_lines}
 
@@ -109,7 +120,8 @@ async def run():
         for step in passed:
             print(f"  [PASS] {{step}}")
         for step in failed:
-            print(f"  [FAIL] {{step}}")
+            err = errors.get(step, "retornou False")
+            print(f"  [FAIL] {{step}}: {{err}}")
         print("-" * 50)
         print(f"  Total: {{len(results)}} | Passed: {{len(passed)}} | Failed: {{len(failed)}}")
         print("=" * 50)
