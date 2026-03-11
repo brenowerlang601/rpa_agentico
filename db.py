@@ -160,11 +160,24 @@ def get_all_workflows() -> list[dict]:
     try:
         with _get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT name, code, steps, updated_at FROM workflows ORDER BY name")
+                cur.execute("SELECT id, name, code, steps, updated_at FROM workflows ORDER BY id")
                 return [dict(r) for r in cur.fetchall()]
     except Exception as e:
         logger.error(f"[DB ERROR] get_all_workflows falhou: {e}")
         return []
+
+
+def get_workflow_by_id(workflow_id: int) -> dict | None:
+    """Retorna um workflow pelo id."""
+    try:
+        with _get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT id, name, steps FROM workflows WHERE id = %s", (workflow_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"[DB ERROR] get_workflow_by_id({workflow_id}) falhou: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------

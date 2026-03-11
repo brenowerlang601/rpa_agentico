@@ -19,6 +19,7 @@ from flask import Flask, Response, jsonify, render_template, request
 
 from db import delete_tool as db_delete_tool
 from db import delete_workflow as db_delete_workflow
+from db import get_workflow_by_id as db_get_workflow_by_id
 from db import init_db, rename_tool as db_rename_tool
 from db import restore_from_db, upsert_tool as db_upsert_tool
 from db import upsert_workflow as db_upsert_workflow
@@ -161,7 +162,36 @@ def api_tools():
 
 @app.route("/api/workflows")
 def api_workflows():
-    return jsonify(_all_workflows())
+    from db import get_all_workflows
+    rows = get_all_workflows()
+    # Inclui o id do banco junto com os dados do disco
+    db_map = {r["name"]: r["id"] for r in rows}
+    result = []
+    for w in _all_workflows():
+        w["id"] = db_map.get(w["name"])
+        result.append(w)
+    return jsonify(result)
+
+
+@app.route("/api/run-workflow/<int:workflow_id>", methods=["POST"])
+def api_run_workflow_by_id(workflow_id: int):
+    """Executa um workflow pelo seu ID do banco via SSE."""
+    row = db_get_workflow_by_id(workflow_id)
+    if not row:
+        return jsonify({"error": f"Workflow ID {workflow_id} não encontrado"}), 404
+
+    steps = row["steps"] if isinstance(row["steps"], list) else []
+    if not steps:
+        return jsonify({"error": "Workflow não tem steps"}), 400
+
+    data = request.json or {}
+    return _run_steps(
+        workflow_name=row["name"],
+        steps=steps,
+        headless=data.get("headless", False),
+        start_from=data.get("start_from") or None,
+        stop_before=data.get("stop_before") or None,
+    )
 
 
 @app.route("/api/json-files")
@@ -341,31 +371,19 @@ def api_save_workflow():
     return jsonify({"ok": True, "file": path.name})
 
 
-@app.route("/api/run", methods=["POST"])
-def api_run():
-    """
-    Executa o script gerado para os steps fornecidos via SSE.
-    Salva um script temporário, executa com o Python do venv e faz stream do output linha a linha.
-    """
+def _run_steps(workflow_name: str, steps: list, headless: bool = True,
+               start_from: str | None = None, stop_before: str | None = None):
+    """Lógica central de execução: gera script temporário e faz stream SSE."""
     global _active_proc
-
-    data = request.json
-    workflow_name = data.get("workflow_name", "workflow")
-    steps = data.get("steps", [])
-    stop_before = data.get("stop_before") or None   # nome da tool onde parar (breakpoint)
-    start_from  = data.get("start_from")  or None   # nome da tool a partir de onde iniciar
-    headless    = data.get("headless", True)         # True = sem janela, False = CDP
 
     if not steps:
         return jsonify({"error": "Nenhum step para executar"}), 400
 
-    # Inicia a partir de um step específico (retomada após falha)
     if start_from and start_from in steps:
         steps = steps[steps.index(start_from):]
         if not steps:
             return jsonify({"error": "start_from aponta para o último step"}), 400
 
-    # Trunca a lista de steps no breakpoint (não inclui o step marcado)
     if stop_before and stop_before in steps:
         steps = steps[:steps.index(stop_before)]
         if not steps:
@@ -418,6 +436,19 @@ def api_run():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    """Executa steps fornecidos diretamente via SSE."""
+    data = request.json
+    return _run_steps(
+        workflow_name=data.get("workflow_name", "workflow"),
+        steps=data.get("steps", []),
+        headless=data.get("headless", True),
+        start_from=data.get("start_from") or None,
+        stop_before=data.get("stop_before") or None,
+    )
 
 
 @app.route("/api/run/cancel", methods=["POST"])
