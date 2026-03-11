@@ -83,6 +83,21 @@
     .tool-card .card-btn.del:hover { color: #fc8181; background: #2d3748; }
     .tool-card .card-btn.ren:hover { color: #68d391; background: #2d3748; }
 
+    /* Segmentos de categoria na sidebar */
+    .tool-segment { margin-bottom: 4px; }
+    .tool-segment-header {
+      display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+      color: #4a5568; cursor: pointer; border-radius: 5px; user-select: none;
+    }
+    .tool-segment-header:hover { background: #1e2235; color: #718096; }
+    .tool-segment-header .seg-icon { font-size: 13px; }
+    .tool-segment-header .seg-count { margin-left: auto; font-size: 10px; background: #2d3748; border-radius: 10px; padding: 1px 6px; color: #718096; }
+    .tool-segment-header .seg-chevron { font-size: 10px; transition: transform .15s; }
+    .tool-segment-header.collapsed .seg-chevron { transform: rotate(-90deg); }
+    .tool-segment-body { padding-left: 0; }
+    .tool-segment-body.hidden { display: none; }
+
     /* CANVAS — fluxo atual */
     .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     .canvas-header { padding: 12px 16px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #718096; }
@@ -421,35 +436,104 @@ function loadTools() {
   });
 }
 
+// ─── Categorização de tools por tipo de ação ──────────────────────────────────
+const TOOL_SEGMENTS = [
+  { key: 'login',        label: 'Login',         icon: '🔑', terms: ['login', 'entrar', 'autenticar', 'logon', 'signin'] },
+  { key: 'navegacao',    label: 'Navegação',      icon: '🧭', terms: ['navegar', 'abrir', 'acessar', 'ir_para', 'goto', 'menu', 'aba', 'tab', 'tela'] },
+  { key: 'consulta',     label: 'Consulta',       icon: '🔍', terms: ['buscar', 'pesquisar', 'filtrar', 'consultar', 'listar', 'search'] },
+  { key: 'preenchimento',label: 'Preenchimento',  icon: '✏️', terms: ['preencher', 'digitar', 'inserir', 'selecionar', 'escolher', 'fill', 'campo', 'formulario', 'form'] },
+  { key: 'confirmacao',  label: 'Confirmação',    icon: '✅', terms: ['confirmar', 'salvar', 'gravar', 'finalizar', 'concluir', 'enviar', 'aprovar', 'submit', 'ok'] },
+  { key: 'outras',       label: 'Outras',         icon: '⚙️', terms: [] },
+];
+
+// Estado de colapso por segmento (persistido na sessão)
+const _segCollapsed = {};
+
+function classifyTool(name) {
+  const n = name.toLowerCase();
+  for (const seg of TOOL_SEGMENTS) {
+    if (seg.key === 'outras') continue;
+    if (seg.terms.some(t => n.includes(t))) return seg.key;
+  }
+  return 'outras';
+}
+
+function _makeToolCard(tool) {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  card.dataset.tool = tool.name;
+  card.innerHTML = `
+    <span class="grip">⠿</span>
+    <span class="tool-name">${tool.name}</span>
+    <button class="card-btn ren" title="Renomear" onclick="openRename('${tool.name}', event)">✏</button>
+    <button class="card-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">⊞</button>
+    <button class="card-btn del" title="Deletar tool" onclick="deleteTool('${tool.name}', event)">✕</button>
+  `;
+  card.addEventListener('dblclick', () => addToFlow(tool.name));
+  return card;
+}
+
 function renderLibrary() {
   const lib = document.getElementById('toolLibrary');
   lib.innerHTML = '';
+
+  // Agrupa tools por segmento
+  const groups = {};
+  TOOL_SEGMENTS.forEach(s => { groups[s.key] = []; });
   allTools.forEach(tool => {
-    const card = document.createElement('div');
-    card.className = 'tool-card';
-    card.dataset.tool = tool.name;
-    card.innerHTML = `
-      <span class="grip">⠿</span>
-      <span class="tool-name">${tool.name}</span>
-      <button class="card-btn ren" title="Renomear" onclick="openRename('${tool.name}', event)">✏</button>
-      <button class="card-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">⊞</button>
-      <button class="card-btn del" title="Deletar tool" onclick="deleteTool('${tool.name}', event)">✕</button>
-    `;
-    card.addEventListener('dblclick', () => addToFlow(tool.name));
-    lib.appendChild(card);
+    const key = classifyTool(tool.name);
+    groups[key].push(tool);
   });
+
+  TOOL_SEGMENTS.forEach(seg => {
+    const tools = groups[seg.key];
+    if (tools.length === 0) return;
+
+    const collapsed = !!_segCollapsed[seg.key];
+
+    const wrap = document.createElement('div');
+    wrap.className = 'tool-segment';
+    wrap.dataset.seg = seg.key;
+
+    const header = document.createElement('div');
+    header.className = 'tool-segment-header' + (collapsed ? ' collapsed' : '');
+    header.innerHTML = `
+      <span class="seg-icon">${seg.icon}</span>
+      <span>${seg.label}</span>
+      <span class="seg-count">${tools.length}</span>
+      <span class="seg-chevron">▾</span>
+    `;
+    header.addEventListener('click', () => {
+      const isNowCollapsed = !_segCollapsed[seg.key];
+      _segCollapsed[seg.key] = isNowCollapsed;
+      header.classList.toggle('collapsed', isNowCollapsed);
+      body.classList.toggle('hidden', isNowCollapsed);
+    });
+
+    const body = document.createElement('div');
+    body.className = 'tool-segment-body' + (collapsed ? ' hidden' : '');
+
+    tools.forEach(tool => body.appendChild(_makeToolCard(tool)));
+
+    wrap.appendChild(header);
+    wrap.appendChild(body);
+    lib.appendChild(wrap);
+  });
+
   initLibrarySortable();
-  // Atualiza badges de pending no canvas
   updatePendingBadges();
 }
 
 // ─── Drag-and-drop: biblioteca → canvas ──────────────────────────────────────
 function initLibrarySortable() {
-  Sortable.create(document.getElementById('toolLibrary'), {
-    group: { name: 'tools', pull: 'clone', put: false },
-    sort: false,
-    animation: 150,
-    ghostClass: 'sortable-ghost',
+  // Inicializa Sortable em cada segment-body (drag clone → canvas)
+  document.querySelectorAll('.tool-segment-body').forEach(segBody => {
+    Sortable.create(segBody, {
+      group: { name: 'tools', pull: 'clone', put: false },
+      sort: false,
+      animation: 150,
+      ghostClass: 'sortable-ghost',
+    });
   });
 }
 
