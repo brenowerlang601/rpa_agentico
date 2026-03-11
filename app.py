@@ -87,7 +87,10 @@ def _preview_script(workflow_name: str, steps: list[str], headless: bool = True)
         f"            results[{s!r}] = (_r is not False)\n"
         f"        except Exception as _e:\n"
         f"            results[{s!r}] = False\n"
-        f"            errors[{s!r}] = str(_e)"
+        f"            errors[{s!r}] = str(_e)\n"
+        f"        if not results.get({s!r}, True):\n"
+        f"            print('false')\n"
+        f"            sys.exit(1)"
         for s in steps
     )
     if headless:

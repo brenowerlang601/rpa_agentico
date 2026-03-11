@@ -2,7 +2,10 @@ import asyncio
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 
-async def pesquisa_tela_pedi_f130(page: Page):
+async def pesquisa_tela_pedi_f130(page: Page) -> bool:
+    _url_inicial = await page.evaluate('location.href')
+    errors = []
+
     # Ação 1: evaluate JS (primeira tentativa de busca)
     await asyncio.sleep(0.5)
     try:
@@ -126,3 +129,13 @@ async def pesquisa_tela_pedi_f130(page: Page):
         pass
 
     await asyncio.sleep(0.5)
+
+    _url_final = await page.evaluate('location.href')
+    if _url_final == _url_inicial:
+        errors.append(('url_unchanged', 'URL não mudou após execução'))
+
+    if errors:
+        print(f'[FAIL] pesquisa_tela_pedi_f130: {len(errors)} erro(s) {errors}')
+        return False
+    print('[OK] pesquisa_tela_pedi_f130')
+    return True

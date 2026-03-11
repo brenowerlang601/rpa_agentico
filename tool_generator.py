@@ -49,6 +49,12 @@ Regras obrigatórias:
 - NÃO inclua imports — a função será importada em um arquivo que já tem os imports
 - Adicione um comentário inline em cada ação identificando o campo/elemento
 
+Validação de navegação (OBRIGATÓRIO):
+- No INÍCIO da função, capture a URL atual com: `_url_inicial = await page.evaluate('location.href')`
+- No FINAL da função, ANTES de retornar, capture novamente: `_url_final = await page.evaluate('location.href')`
+- Se `_url_final == _url_inicial`: adicione o erro `errors.append(('url_unchanged', 'URL não mudou após execução'))` — isso indica falha de navegação
+- Use `location.href` (via evaluate) e NÃO `page.url`, pois `page.url` ignora fragmentos (#hash) da URL
+
 Ações a executar (JSON com TODOS os passos — nenhum pode ser omitido):
 {actions_json}
 

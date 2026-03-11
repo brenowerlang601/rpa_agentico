@@ -2,6 +2,7 @@
 from playwright.async_api import Page
 
 async def fazer_login_forms_v2(page) -> bool:
+    _url_inicial = await page.evaluate('location.href')
     errors: list[tuple[str, str]] = []
 
     # Primeira ação: fill
@@ -45,6 +46,10 @@ async def fazer_login_forms_v2(page) -> bool:
         await locator.fill("INTERSYSINTERSYS")
     except Exception as e:
         errors.append(("fill", str(e)))
+
+    _url_final = await page.evaluate('location.href')
+    if _url_final == _url_inicial:
+        errors.append(('url_unchanged', 'URL não mudou após execução'))
 
     if errors:
         print(f"[FAIL] fazer_login_forms_v2: {len(errors)} erro(s) {errors}")

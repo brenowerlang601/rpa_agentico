@@ -4,6 +4,7 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 async def login_erp(page: Page) -> bool:
     """Executa o passo 'login_erp'. Retorna True se todas as ações tiveram sucesso."""
+    _url_inicial = await page.evaluate('location.href')
     errors: list[tuple[str, str]] = []
 
     try:
@@ -71,6 +72,10 @@ async def login_erp(page: Page) -> bool:
         await page.wait_for_load_state('networkidle', timeout=15000)
     except Exception:
         pass
+
+    _url_final = await page.evaluate('location.href')
+    if _url_final == _url_inicial:
+        errors.append(('url_unchanged', 'URL não mudou após execução'))
 
     if errors:
         print(f"[FAIL] login_erp: {len(errors)} erro(s)")

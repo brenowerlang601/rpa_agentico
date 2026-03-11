@@ -2,6 +2,7 @@ from playwright.async_api import Page
 import asyncio
 
 async def preencher_forms(page) -> bool:
+    _url_inicial = await page.evaluate('location.href')
     await asyncio.sleep(0.5)
     errors = []
     
@@ -419,6 +420,10 @@ async def preencher_forms(page) -> bool:
         errors.append(("key_press Enter numero_controle.", str(e))) 
   
     
+    _url_final = await page.evaluate('location.href')
+    if _url_final == _url_inicial:
+        errors.append(('url_unchanged', 'URL não mudou após execução'))
+
     if not errors:
         print("[OK] preencher_forms")
         return True
