@@ -45,6 +45,14 @@
     .btn-test-mode:hover { background: #1d4ed8; opacity: 1; }
     .btn-test-mode.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
 
+    /* Toggle headless */
+    .headless-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: #718096; }
+    .headless-toggle input[type=checkbox] { appearance: none; width: 32px; height: 18px; background: #2d3748; border-radius: 9px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; }
+    .headless-toggle input[type=checkbox]::after { content: ''; position: absolute; width: 13px; height: 13px; background: #718096; border-radius: 50%; top: 2.5px; left: 2.5px; transition: transform .2s, background .2s; }
+    .headless-toggle input[type=checkbox]:checked { background: #553c9a; }
+    .headless-toggle input[type=checkbox]:checked::after { transform: translateX(14px); background: #a78bfa; }
+    .headless-toggle #headlessLabel { min-width: 52px; }
+
     /* TERMINAL */
     .terminal-panel { background: #0a0c14; border-top: 1px solid #2d3748; flex-shrink: 0; display: flex; flex-direction: column; transition: height .2s; height: 0; overflow: hidden; }
     .terminal-panel.open { height: 220px; }
@@ -194,6 +202,10 @@
   <button class="btn btn-outline btn-sm hide-in-test" onclick="loadWorkflow()">Carregar fluxo...</button>
   <button class="btn btn-success hide-in-test" onclick="saveWorkflow()">Salvar script</button>
   <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()">⬡ Modo Teste</button>
+  <label class="headless-toggle" title="Headless: executa sem abrir janela do browser">
+    <input type="checkbox" id="headlessToggle" checked onchange="updateHeadlessLabel()">
+    <span id="headlessLabel">Headless</span>
+  </label>
   <button class="btn btn-run" id="runBtn" onclick="runWorkflow()">&#9654; Executar</button>
   <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()">⏸ Pausar</button>
   <button class="btn btn-cancel" id="cancelBtn" onclick="cancelRun()">&#9632; Cancelar</button>
@@ -1078,17 +1090,19 @@ function runWorkflow() {
   pauseBtn.classList.remove('paused');
   pauseBtn.textContent = '⏸ Pausar';
 
+  const headless = document.getElementById('headlessToggle').checked;
   if (effectiveStartFrom) {
     appendLine(`↩ Retomando a partir de: ${effectiveStartFrom}`, 'dim');
   } else {
     appendLine(`Iniciando fluxo: ${name}`, 'dim');
   }
+  appendLine(headless ? '🔇 Modo headless (sem janela)' : '🖥 Modo visual (CDP)', 'dim');
   appendLine('─'.repeat(44), 'sep');
 
   fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep, start_from: effectiveStartFrom }),
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep, start_from: effectiveStartFrom, headless }),
   }).then(response => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -1149,6 +1163,11 @@ function togglePause() {
         appendLine('▶ Execução retomada', 'dim');
       }
     });
+}
+
+function updateHeadlessLabel() {
+  const checked = document.getElementById('headlessToggle').checked;
+  document.getElementById('headlessLabel').textContent = checked ? 'Headless' : 'Com browser';
 }
 
 function toggleTestMode() {

@@ -71,7 +71,7 @@ def _all_workflows() -> list[dict]:
     return workflows
 
 
-def _preview_script(workflow_name: str, steps: list[str]) -> str:
+def _preview_script(workflow_name: str, steps: list[str], headless: bool = True) -> str:
     """Gera preview do script de teste para uma sequência de steps."""
     import_lines = "\n".join(f"from tools.{s} import {s}" for s in steps)
     # Cada step é executado em try/except independente:
@@ -90,6 +90,11 @@ def _preview_script(workflow_name: str, steps: list[str]) -> str:
         f"            errors[{s!r}] = str(_e)"
         for s in steps
     )
+    if headless:
+        browser_setup = "        browser = await p.chromium.launch(headless=True)\n        page = await browser.new_page()"
+    else:
+        browser_setup = "        browser = await p.chromium.connect_over_cdp('http://localhost:9222')\n        page = browser.contexts[0].pages[0]"
+
     return f"""\
 import asyncio
 import sys
@@ -104,8 +109,7 @@ from playwright.async_api import async_playwright
 
 async def run():
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp('http://localhost:9222')
-        page = browser.contexts[0].pages[0]
+{browser_setup}
 
         results: dict[str, bool] = {{}}
         errors: dict[str, str] = {{}}
@@ -326,6 +330,7 @@ def api_run():
     steps = data.get("steps", [])
     stop_before = data.get("stop_before") or None   # nome da tool onde parar (breakpoint)
     start_from  = data.get("start_from")  or None   # nome da tool a partir de onde iniciar
+    headless    = data.get("headless", True)         # True = sem janela, False = CDP
 
     if not steps:
         return jsonify({"error": "Nenhum step para executar"}), 400
@@ -345,7 +350,7 @@ def api_run():
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", prefix="rpa_run_", dir=TESTS_DIR, delete=False, encoding="utf-8"
     ) as tf:
-        tf.write(_preview_script(workflow_name, steps))
+        tf.write(_preview_script(workflow_name, steps, headless=headless))
         tmp_path = Path(tf.name)
 
     python_bin = Path(sys.executable)
