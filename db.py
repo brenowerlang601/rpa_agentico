@@ -23,7 +23,15 @@ logger = logging.getLogger(__name__)
 
 
 def _get_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+    from urllib.parse import urlparse
+    url = urlparse(os.getenv("DATABASE_URL"))
+    return psycopg2.connect(
+        host=url.hostname,
+        port=url.port or 5432,
+        dbname=url.path.lstrip("/"),
+        user=url.username,
+        password=url.password,
+    )
 
 
 def init_db() -> None:

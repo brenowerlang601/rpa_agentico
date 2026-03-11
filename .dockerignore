@@ -1,0 +1,10 @@
+.env
+.git
+.claude
+__pycache__
+*.pyc
+*.pyo
+tools/
+tests/
+json_rpa/
+migrate_to_db.py
