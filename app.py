@@ -7,6 +7,7 @@ Interface web para gerenciar workflows RPA.
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -16,6 +17,11 @@ import threading
 from pathlib import Path
 from flask import Flask, Response, jsonify, render_template, request
 
+from db import delete_tool as db_delete_tool
+from db import delete_workflow as db_delete_workflow
+from db import init_db, rename_tool as db_rename_tool
+from db import restore_from_db, upsert_tool as db_upsert_tool
+from db import upsert_workflow as db_upsert_workflow
 from json_processor import (
     TESTS_DIR,
     TOOLS_DIR,
@@ -27,9 +33,19 @@ from json_processor import (
     save_test_script,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 app = Flask(__name__)
 JSON_RPA_DIR = Path("json_rpa")
 JSON_RPA_DIR.mkdir(exist_ok=True)
+
+# Startup: garante que banco e disco estão sincronizados.
+# Roda tanto via `python app.py` quanto via gunicorn/uwsgi no container.
+init_db()
+restore_from_db(TOOLS_DIR, TESTS_DIR)
 
 # Processo ativo de execução (para poder cancelar/pausar)
 _active_proc: subprocess.Popen | None = None
@@ -202,6 +218,7 @@ def api_tool_new():
     if p.exists():
         return jsonify({"error": f"Já existe uma tool chamada '{name}'"}), 409
     p.write_text(code, encoding="utf-8")
+    db_upsert_tool(name, code)
     return jsonify({"ok": True, "name": name})
 
 
@@ -211,6 +228,7 @@ def api_tool_save(name: str):
     p = TOOLS_DIR / f"{name}.py"
     code = request.json.get("code", "")
     p.write_text(code, encoding="utf-8")
+    db_upsert_tool(name, code)
     return jsonify({"ok": True})
 
 
@@ -220,6 +238,7 @@ def api_tool_delete(name: str):
     p = TOOLS_DIR / f"{name}.py"
     if not p.exists():
         return jsonify({"error": "Tool não encontrada"}), 404
+    db_delete_tool(name)
     p.unlink()
     return jsonify({"ok": True})
 
@@ -246,6 +265,7 @@ def api_tool_rename(name: str):
 
     new_path.write_text(code, encoding="utf-8")
     old_path.unlink()
+    db_rename_tool(name, new_name, code)
     return jsonify({"ok": True, "new_name": new_name})
 
 
@@ -317,6 +337,7 @@ def api_save_workflow():
             path = tmp_path
     else:
         path = save_test_script(workflow_name, named, TESTS_DIR)
+    db_upsert_workflow(path.stem, path.read_text(encoding="utf-8"), steps)
     return jsonify({"ok": True, "file": path.name})
 
 
@@ -527,6 +548,7 @@ def api_generate_tools():
                 elif action == "reject":
                     tool_path = TOOLS_DIR / f"{name}.py"
                     if tool_path.exists():
+                        db_delete_tool(name)
                         tool_path.unlink()
                     yield f"data: __REJECTED__{name}\n\n"
                     yield "data: __GENERATE_DONE__\n\n"

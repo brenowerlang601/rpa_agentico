@@ -93,9 +93,15 @@ def _call_llm(prompt: str) -> str:
 def _save_tool(func_name: str, func_code: str, fingerprint: str = "") -> Path:
     fp_comment = f"# actions_fp: {fingerprint}\n" if fingerprint else ""
     header = f"{fp_comment}from playwright.async_api import Page\n\n"
+    full_code = header + func_code
     tool_path = TOOLS_DIR / f"{func_name}.py"
-    tool_path.write_text(header + func_code, encoding="utf-8")
+    tool_path.write_text(full_code, encoding="utf-8")
     print(f"[tool_generator] Salvo: {tool_path}")
+    try:
+        from db import upsert_tool
+        upsert_tool(func_name, full_code, fingerprint)
+    except Exception as e:
+        print(f"[DB ERROR] upsert_tool('{func_name}') falhou: {e}")
     return tool_path
 
 
