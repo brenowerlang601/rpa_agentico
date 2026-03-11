@@ -110,6 +110,12 @@
     .flow-block.has-breakpoint { border-left: 3px solid #e53e3e; }
     .flow-block.has-breakpoint .block-btn.bp { color: #e53e3e; }
     .flow-block.has-breakpoint .step-num::before { content: '●'; color: #e53e3e; font-size: 8px; display: block; line-height: 1; }
+    .flow-block .block-btn.sf { font-size: 13px; }
+    .flow-block .block-btn.sf:hover { color: #68d391; background: #2d3748; }
+    .flow-block.has-start-from { border-left: 3px solid #38a169; }
+    .flow-block.has-start-from .block-btn.sf { color: #38a169; }
+    .btn-resume-from { display: block; margin: 8px auto 2px; background: #1a3a2a; color: #68d391; border: 1px solid #38a169; border-radius: 6px; padding: 6px 18px; font-size: 13px; cursor: pointer; }
+    .btn-resume-from:hover { background: #22543d; }
     .empty-hint { text-align: center; color: #4a5568; font-size: 13px; padding: 40px 20px; }
 
     /* PREVIEW */
@@ -375,6 +381,8 @@ let allTools = [];        // [{name, code}]
 let flowSteps = [];       // [toolName, ...]
 let pendingSteps = new Set(); // tools ainda sendo geradas
 let breakpointStep = null;    // nome da tool onde a execução deve parar
+let startFromStep  = null;    // nome da tool a partir de onde iniciar (retomada)
+let _lastFailedStep = null;   // último step que falhou (para botão de retomada)
 let currentEditTool = null;
 let renamingTool = null;
 let editorCM = null;
@@ -495,6 +503,7 @@ function renderFlow() {
       <span class="step-name">${name}</span>
       ${isPending ? '<span class="step-badge">gerando...</span>' : ''}
       <div class="block-actions">
+        <button class="block-btn sf" title="Executar a partir deste step" onclick="setStartFrom('${name}')">↩</button>
         <button class="block-btn bp" title="Parar antes deste step (breakpoint)" onclick="toggleBreakpoint('${name}', event)">⬤</button>
         <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)" ${isPending ? 'disabled style="opacity:.4"' : ''}>✎</button>
         <button class="block-btn remove" title="Remover" onclick="removeStep(${idx})">✕</button>
@@ -969,6 +978,10 @@ function runWorkflow() {
   panel.classList.add('open');
   output.innerHTML = '';
   clearStepHighlights();
+  _lastFailedStep = null;
+  // Captura antes de limpar — clearStartFrom() zera a variável
+  const effectiveStartFrom = startFromStep;
+  clearStartFrom();
   status.style.display = 'inline';
   status.className = 'terminal-status running';
   status.textContent = 'Executando...';
@@ -981,13 +994,17 @@ function runWorkflow() {
   pauseBtn.classList.remove('paused');
   pauseBtn.textContent = '⏸ Pausar';
 
-  appendLine(`Iniciando fluxo: ${name}`, 'dim');
+  if (effectiveStartFrom) {
+    appendLine(`↩ Retomando a partir de: ${effectiveStartFrom}`, 'dim');
+  } else {
+    appendLine(`Iniciando fluxo: ${name}`, 'dim');
+  }
   appendLine('─'.repeat(44), 'sep');
 
   fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep }),
+    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep, start_from: effectiveStartFrom }),
   }).then(response => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -1069,6 +1086,13 @@ function renderLine(line) {
     highlightRunningStep(toolName);
     return; // não exibe no terminal
   }
+  if (line.startsWith('__START_FROM__')) {
+    const toolName = line.slice('__START_FROM__'.length).trim();
+    appendLine('─'.repeat(44), 'sep');
+    appendLine(`↩ Retomando a partir de: ${toolName}`, 'dim');
+    appendLine('─'.repeat(44), 'sep');
+    return;
+  }
   if (line.startsWith('__BREAKPOINT__')) {
     const toolName = line.slice('__BREAKPOINT__'.length).trim();
     appendLine('─'.repeat(44), 'sep');
@@ -1076,8 +1100,18 @@ function renderLine(line) {
     appendLine('─'.repeat(44), 'sep');
     return;
   }
-  if (line.startsWith('[OK]')) appendLine(line, 'ok');
-  else if (line.startsWith('[FAIL]') || line.startsWith('  - ')) appendLine(line, 'fail');
+  if (line.startsWith('[OK]')) {
+    // [OK] nome_da_tool — step passou
+    const m = line.match(/\[OK\]\s+(\S+)/);
+    appendLine(line, 'ok');
+  }
+  else if (line.startsWith('[FAIL]')) {
+    // [FAIL] nome_da_tool: N erro(s) — step falhou, guarda para retomada
+    const m = line.match(/\[FAIL\]\s+(\S+)/);
+    if (m) _lastFailedStep = m[1];
+    appendLine(line, 'fail');
+  }
+  else if (line.startsWith('  - ')) appendLine(line, 'fail');
   else if (line.startsWith('=') || line.startsWith('-')) appendLine(line, 'sep');
   else if (line.startsWith('  [PASS]')) {
     const match = line.match(/\[PASS\]\s+(\S+)/);
@@ -1171,7 +1205,41 @@ function finishRun(code) {
   } else {
     status.className = 'terminal-status fail';
     status.textContent = 'FALHOU';
+    // Mostra botão de retomada se houver um step identificado como falho
+    if (_lastFailedStep) {
+      appendLine('─'.repeat(44), 'sep');
+      const output = document.getElementById('terminalOutput');
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-resume-from';
+      btn.textContent = `↩ Retomar a partir de: ${_lastFailedStep}`;
+      btn.onclick = () => resumeFrom(_lastFailedStep);
+      output.appendChild(btn);
+      output.scrollTop = output.scrollHeight;
+    }
   }
+}
+
+// Define o step de retomada e dispara execução
+function resumeFrom(stepName) {
+  startFromStep = stepName;
+  runWorkflow();
+}
+
+// Marca visualmente o bloco como ponto de início e limpa os outros
+function setStartFrom(name) {
+  startFromStep = name;
+  document.querySelectorAll('#dropZone .flow-block').forEach(b => {
+    b.classList.toggle('has-start-from', b.dataset.tool === name);
+  });
+  toast(`↩ Executar a partir de: ${name}`, 'ok');
+}
+
+// Limpa o estado de retomada (chamado no início de cada execução)
+function clearStartFrom() {
+  startFromStep = null;
+  document.querySelectorAll('#dropZone .flow-block').forEach(b => {
+    b.classList.remove('has-start-from');
+  });
 }
 
 function clearTerminal() {

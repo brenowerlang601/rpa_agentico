@@ -324,10 +324,17 @@ def api_run():
     data = request.json
     workflow_name = data.get("workflow_name", "workflow")
     steps = data.get("steps", [])
-    stop_before = data.get("stop_before") or None  # nome da tool onde parar (breakpoint)
+    stop_before = data.get("stop_before") or None   # nome da tool onde parar (breakpoint)
+    start_from  = data.get("start_from")  or None   # nome da tool a partir de onde iniciar
 
     if not steps:
         return jsonify({"error": "Nenhum step para executar"}), 400
+
+    # Inicia a partir de um step específico (retomada após falha)
+    if start_from and start_from in steps:
+        steps = steps[steps.index(start_from):]
+        if not steps:
+            return jsonify({"error": "start_from aponta para o último step"}), 400
 
     # Trunca a lista de steps no breakpoint (não inclui o step marcado)
     if stop_before and stop_before in steps:
@@ -345,6 +352,8 @@ def api_run():
 
     def generate():
         global _active_proc
+        if start_from:
+            yield f"data: __START_FROM__{start_from}\n\n"
         if stop_before:
             yield f"data: __BREAKPOINT__{stop_before}\n\n"
         env = os.environ.copy()
