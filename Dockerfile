@@ -27,7 +27,7 @@ RUN mkdir -p tools tests json_rpa
 
 EXPOSE 5000
 
-# Gunicorn com 1 worker (SSE + estado em memória exige processo único)
-CMD ["uv", "run", "gunicorn", "-w", "1", "-b", "0.0.0.0:5000", \
-     "--timeout", "120", "--keep-alive", "5", \
+# 1 worker + threads para suportar execuções paralelas (SSE + estado em memória exige processo único)
+CMD ["uv", "run", "gunicorn", "-w", "1", "--threads", "20", \
+     "-b", "0.0.0.0:5000", "--timeout", "300", "--keep-alive", "5", \
      "--log-level", "info", "app:app"]

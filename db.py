@@ -54,6 +54,18 @@ def init_db() -> None:
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS execucoes (
+        id           SERIAL PRIMARY KEY,
+        run_id       TEXT NOT NULL UNIQUE,
+        workflow_id  INTEGER REFERENCES workflows(id) ON DELETE SET NULL,
+        workflow_name TEXT NOT NULL,
+        steps        JSONB NOT NULL DEFAULT '[]',
+        status       TEXT NOT NULL DEFAULT 'running',
+        exit_code    INTEGER,
+        iniciado_em  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        finalizado_em TIMESTAMPTZ
+    );
     """
     try:
         with _get_connection() as conn:
@@ -178,6 +190,60 @@ def get_workflow_by_id(workflow_id: int) -> dict | None:
     except Exception as e:
         logger.error(f"[DB ERROR] get_workflow_by_id({workflow_id}) falhou: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Execuções CRUD
+# ---------------------------------------------------------------------------
+
+def inserir_execucao(run_id: str, workflow_name: str, steps: list[str], workflow_id: int | None = None) -> None:
+    """Registra o início de uma execução."""
+    import json
+    sql = """
+    INSERT INTO execucoes (run_id, workflow_id, workflow_name, steps, status)
+    VALUES (%s, %s, %s, %s, 'running');
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (run_id, workflow_id, workflow_name, json.dumps(steps)))
+    except Exception as e:
+        logger.error(f"[DB ERROR] inserir_execucao('{run_id}') falhou: {e}")
+
+
+def finalizar_execucao(run_id: str, exit_code: int) -> None:
+    """Atualiza status e exit_code ao fim da execução."""
+    status = "sucesso" if exit_code == 0 else ("cancelado" if exit_code == -15 else "falha")
+    sql = """
+    UPDATE execucoes
+    SET status = %s, exit_code = %s, finalizado_em = NOW()
+    WHERE run_id = %s;
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (status, exit_code, run_id))
+    except Exception as e:
+        logger.error(f"[DB ERROR] finalizar_execucao('{run_id}') falhou: {e}")
+
+
+def get_execucoes(limit: int = 100) -> list[dict]:
+    """Retorna as últimas execuções ordenadas pela mais recente."""
+    sql = """
+    SELECT id, run_id, workflow_id, workflow_name, steps, status, exit_code,
+           iniciado_em, finalizado_em
+    FROM execucoes
+    ORDER BY iniciado_em DESC
+    LIMIT %s;
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, (limit,))
+                return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"[DB ERROR] get_execucoes falhou: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------

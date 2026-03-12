@@ -20,7 +20,7 @@ async def fazer_login_forms(page) -> bool:
 
     try:
         await page.locator('xpath=id("box1.")/div[4]/input[1]').click()
-        await page.locator('xpath=id("box1.")/div[4]/input[1]').fill('12345')
+        await page.locator('xpath=id("box1.")/div[4]/input[1]').fill('1234')
     except Exception as e:
         errors.append(('fill_senha', str(e)))
 

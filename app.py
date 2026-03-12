@@ -19,8 +19,11 @@ from flask import Flask, Response, jsonify, render_template, request
 
 from db import delete_tool as db_delete_tool
 from db import delete_workflow as db_delete_workflow
+from db import finalizar_execucao as db_finalizar_execucao
+from db import get_execucoes as db_get_execucoes
 from db import get_workflow_by_id as db_get_workflow_by_id
-from db import init_db, rename_tool as db_rename_tool
+from db import init_db, inserir_execucao as db_inserir_execucao
+from db import rename_tool as db_rename_tool
 from db import restore_from_db, upsert_tool as db_upsert_tool
 from db import upsert_workflow as db_upsert_workflow
 from json_processor import (
@@ -48,10 +51,10 @@ JSON_RPA_DIR.mkdir(exist_ok=True)
 init_db()
 restore_from_db(TOOLS_DIR, TESTS_DIR)
 
-# Processo ativo de execução (para poder cancelar/pausar)
-_active_proc: subprocess.Popen | None = None
-_active_proc_lock = threading.Lock()
-_active_proc_paused = False
+# Processos ativos de execução — keyed por run_id (suporta execuções paralelas)
+# Estrutura: {run_id: {"proc": Popen, "paused": bool}}
+_runs: dict[str, dict] = {}
+_runs_lock = threading.Lock()
 
 # Revisão de tools: canal de comunicação entre o SSE de geração e a resposta do usuário
 _review_event = threading.Event()
@@ -374,7 +377,7 @@ def api_save_workflow():
 def _run_steps(workflow_name: str, steps: list, headless: bool = True,
                start_from: str | None = None, stop_before: str | None = None):
     """Lógica central de execução: gera script temporário e faz stream SSE."""
-    global _active_proc
+    import uuid
 
     if not steps:
         return jsonify({"error": "Nenhum step para executar"}), 400
@@ -389,6 +392,8 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
         if not steps:
             return jsonify({"error": "Breakpoint está no primeiro step — nenhum step para executar"}), 400
 
+    run_id = str(uuid.uuid4())[:8]
+
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", prefix="rpa_run_", dir=TESTS_DIR, delete=False, encoding="utf-8"
     ) as tf:
@@ -398,13 +403,14 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
     python_bin = Path(sys.executable)
 
     def generate():
-        global _active_proc
+        yield f"data: __RUN_ID__{run_id}\n\n"
         if start_from:
             yield f"data: __START_FROM__{start_from}\n\n"
         if stop_before:
             yield f"data: __BREAKPOINT__{stop_before}\n\n"
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        proc = None
         try:
             proc = subprocess.Popen(
                 [str(python_bin), "-u", str(tmp_path)],
@@ -415,20 +421,21 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
                 cwd=str(Path(__file__).parent),
                 env=env,
             )
-            with _active_proc_lock:
-                _active_proc = proc
+            with _runs_lock:
+                _runs[run_id] = {"proc": proc, "paused": False}
+            db_inserir_execucao(run_id, workflow_name, steps)
             for line in proc.stdout:
                 yield f"data: {line.rstrip()}\n\n"
             proc.wait()
-            code = proc.returncode
-            yield f"data: __EXIT__{code}\n\n"
+            yield f"data: __EXIT__{proc.returncode}\n\n"
         except Exception as e:
             yield f"data: [ERRO] {e}\n\n"
             yield "data: __EXIT__1\n\n"
         finally:
-            with _active_proc_lock:
-                _active_proc = None
-            _active_proc_paused = False
+            exit_code = proc.returncode if proc else 1
+            db_finalizar_execucao(run_id, exit_code)
+            with _runs_lock:
+                _runs.pop(run_id, None)
             try:
                 tmp_path.unlink()
             except Exception:
@@ -453,50 +460,68 @@ def api_run():
 
 @app.route("/api/run/cancel", methods=["POST"])
 def api_run_cancel():
-    """Cancela o processo de execução em andamento."""
-    global _active_proc, _active_proc_paused
-    with _active_proc_lock:
-        proc = _active_proc
-    if proc and proc.poll() is None:
-        # Retoma antes de terminar, para evitar que fique preso em SIGSTOP
-        if _active_proc_paused:
-            import signal
-            try:
-                proc.send_signal(signal.SIGCONT)
-            except Exception:
-                pass
-            _active_proc_paused = False
-        proc.terminate()
-        return jsonify({"ok": True, "message": "Execução cancelada"})
-    return jsonify({"ok": False, "message": "Nenhuma execução em andamento"})
+    """Cancela uma execução. run_id opcional — sem ele cancela todas."""
+    import signal
+    run_id = (request.json or {}).get("run_id")
+    with _runs_lock:
+        targets = {run_id: _runs[run_id]} if run_id and run_id in _runs else dict(_runs)
+    if not targets:
+        return jsonify({"ok": False, "message": "Nenhuma execução em andamento"})
+    for rid, run in targets.items():
+        proc = run["proc"]
+        if proc.poll() is None:
+            if run.get("paused"):
+                try:
+                    proc.send_signal(signal.SIGCONT)
+                except Exception:
+                    pass
+            proc.terminate()
+    return jsonify({"ok": True, "cancelled": list(targets.keys())})
 
 
 @app.route("/api/run/pause", methods=["POST"])
 def api_run_pause():
-    """Pausa o processo em andamento via SIGSTOP."""
-    global _active_proc, _active_proc_paused
+    """Pausa uma execução pelo run_id."""
     import signal
-    with _active_proc_lock:
-        proc = _active_proc
-    if proc and proc.poll() is None and not _active_proc_paused:
-        proc.send_signal(signal.SIGSTOP)
-        _active_proc_paused = True
+    run_id = (request.json or {}).get("run_id")
+    with _runs_lock:
+        run = _runs.get(run_id) if run_id else (next(iter(_runs.values()), None))
+    if run and run["proc"].poll() is None and not run.get("paused"):
+        run["proc"].send_signal(signal.SIGSTOP)
+        run["paused"] = True
         return jsonify({"ok": True, "paused": True})
-    return jsonify({"ok": False, "paused": _active_proc_paused})
+    return jsonify({"ok": False, "paused": run.get("paused") if run else False})
 
 
 @app.route("/api/run/resume", methods=["POST"])
 def api_run_resume():
-    """Retoma o processo pausado via SIGCONT."""
-    global _active_proc, _active_proc_paused
+    """Retoma uma execução pausada pelo run_id."""
     import signal
-    with _active_proc_lock:
-        proc = _active_proc
-    if proc and proc.poll() is None and _active_proc_paused:
-        proc.send_signal(signal.SIGCONT)
-        _active_proc_paused = False
+    run_id = (request.json or {}).get("run_id")
+    with _runs_lock:
+        run = _runs.get(run_id) if run_id else (next(iter(_runs.values()), None))
+    if run and run["proc"].poll() is None and run.get("paused"):
+        run["proc"].send_signal(signal.SIGCONT)
+        run["paused"] = False
         return jsonify({"ok": True, "paused": False})
-    return jsonify({"ok": False, "paused": _active_proc_paused})
+    return jsonify({"ok": False, "paused": run.get("paused") if run else False})
+
+
+@app.route("/api/run/list", methods=["GET"])
+def api_run_list():
+    """Lista todas as execuções ativas com seus run_ids."""
+    with _runs_lock:
+        return jsonify([
+            {"run_id": rid, "paused": r.get("paused", False)}
+            for rid, r in _runs.items()
+        ])
+
+
+@app.route("/api/execucoes", methods=["GET"])
+def api_execucoes():
+    """Retorna histórico de execuções (últimas 100 por padrão)."""
+    limit = request.args.get("limit", 100, type=int)
+    return jsonify(db_get_execucoes(limit=limit))
 
 
 @app.route("/api/generate-tools", methods=["POST"])
