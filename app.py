@@ -91,7 +91,7 @@ def _all_workflows() -> list[dict]:
     return workflows
 
 
-def _preview_script(workflow_name: str, steps: list[str], headless: bool = True) -> str:
+def _preview_script(workflow_name: str, steps: list[str], headless: bool = True, cdp_url: str | None = None) -> str:
     """Gera preview do script de teste para uma sequência de steps."""
     import_lines = "\n".join(f"from tools.{s} import {s}" for s in steps)
     # Cada step é executado em try/except independente:
@@ -100,8 +100,6 @@ def _preview_script(workflow_name: str, steps: list[str], headless: bool = True)
     # - retorno None  → PASS (tool sem retorno explícito = não lançou exceção)
     # - exceção       → FAIL com mensagem de erro
     result_lines = "\n".join(
-        f"        print('__RUNNING__{s}', flush=True)\n"
-        f"        sys.stdout.flush()\n"
         f"        try:\n"
         f"            _r = await {s}(page)\n"
         f"            results[{s!r}] = (_r is not False)\n"
@@ -109,14 +107,18 @@ def _preview_script(workflow_name: str, steps: list[str], headless: bool = True)
         f"            results[{s!r}] = False\n"
         f"            errors[{s!r}] = str(_e)\n"
         f"        if not results.get({s!r}, True):\n"
-        f"            print('false')\n"
+        f"            print('false', flush=True)\n"
         f"            sys.exit(1)"
         for s in steps
     )
     if headless:
         browser_setup = "        browser = await p.chromium.launch(headless=True)\n        page = await browser.new_page()"
     else:
-        browser_setup = "        browser = await p.chromium.connect_over_cdp('http://localhost:9222')\n        page = browser.contexts[0].pages[0]"
+        _cdp = cdp_url or os.environ.get("CDP_URL", "http://localhost:9222")
+        if not _cdp.startswith("http"):
+            # Adiciona porta 9222 apenas se não tiver porta já (ex: "1.2.3.4" → "http://1.2.3.4:9222", "1.2.3.4:9223" → "http://1.2.3.4:9223")
+            _cdp = f"http://{_cdp}" if ":" in _cdp else f"http://{_cdp}:9222"
+        browser_setup = f"        browser = await p.chromium.connect_over_cdp({_cdp!r})\n        page = browser.contexts[0].pages[0]"
 
     return f"""\
 import asyncio
@@ -191,9 +193,10 @@ def api_run_workflow_by_id(workflow_id: int):
     return _run_steps(
         workflow_name=row["name"],
         steps=steps,
-        headless=data.get("headless", False),
+        headless=data.get("headless", True),
         start_from=data.get("start_from") or None,
         stop_before=data.get("stop_before") or None,
+        cdp_url=data.get("cdp_url") or None,
     )
 
 
@@ -375,7 +378,8 @@ def api_save_workflow():
 
 
 def _run_steps(workflow_name: str, steps: list, headless: bool = True,
-               start_from: str | None = None, stop_before: str | None = None):
+               start_from: str | None = None, stop_before: str | None = None,
+               cdp_url: str | None = None):
     """Lógica central de execução: gera script temporário e faz stream SSE."""
     import uuid
 
@@ -397,10 +401,36 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", prefix="rpa_run_", dir=TESTS_DIR, delete=False, encoding="utf-8"
     ) as tf:
-        tf.write(_preview_script(workflow_name, steps, headless=headless))
+        tf.write(_preview_script(workflow_name, steps, headless=headless, cdp_url=cdp_url))
         tmp_path = Path(tf.name)
 
     python_bin = Path(sys.executable)
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    if headless:
+        # Modo headless: executa e retorna apenas true/false
+        try:
+            proc = subprocess.run(
+                [str(python_bin), "-u", str(tmp_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                cwd=str(Path(__file__).parent),
+                env=env,
+            )
+            db_inserir_execucao(run_id, workflow_name, steps)
+            result = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "false"
+            db_finalizar_execucao(run_id, proc.returncode)
+            return jsonify({"result": result if result in ("true", "false") else "false"})
+        except Exception as e:
+            db_finalizar_execucao(run_id, 1)
+            return jsonify({"result": "false", "error": str(e)})
+        finally:
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
     def generate():
         yield f"data: __RUN_ID__{run_id}\n\n"
@@ -408,8 +438,6 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
             yield f"data: __START_FROM__{start_from}\n\n"
         if stop_before:
             yield f"data: __BREAKPOINT__{stop_before}\n\n"
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
         proc = None
         try:
             proc = subprocess.Popen(
@@ -455,6 +483,7 @@ def api_run():
         headless=data.get("headless", True),
         start_from=data.get("start_from") or None,
         stop_before=data.get("stop_before") or None,
+        cdp_url=data.get("cdp_url") or None,
     )
 
 
