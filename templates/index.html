@@ -1117,6 +1117,10 @@ function runWorkflow() {
         for (const part of parts) {
           if (!part.startsWith('data: ')) continue;
           const line = part.slice(6);
+          if (line.startsWith('__RUN_ID__')) {
+            _currentRunId = line.slice('__RUN_ID__'.length).trim();
+            continue;
+          }
           if (line.startsWith('__EXIT__')) {
             finishRun(parseInt(line.replace('__EXIT__', ''), 10));
             return;
@@ -1135,7 +1139,8 @@ function runWorkflow() {
 
 // ─── Cancelar execução ────────────────────────────────────────────────────────
 function cancelRun() {
-  fetch('/api/run/cancel', { method: 'POST' })
+  const body = _currentRunId ? JSON.stringify({ run_id: _currentRunId }) : '{}';
+  fetch('/api/run/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     .then(r => r.json())
     .then(data => {
       appendLine('[CANCELADO] Execução interrompida pelo usuário', 'fail');
@@ -1144,11 +1149,13 @@ function cancelRun() {
 }
 
 let _isPaused = false;
+let _currentRunId = null;
 
 function togglePause() {
   const btn = document.getElementById('pauseBtn');
   const endpoint = _isPaused ? '/api/run/resume' : '/api/run/pause';
-  fetch(endpoint, { method: 'POST' })
+  const body = _currentRunId ? JSON.stringify({ run_id: _currentRunId }) : '{}';
+  fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
     .then(r => r.json())
     .then(data => {
       if (!data.ok) return;
@@ -1285,6 +1292,7 @@ function appendLine(text, cls = '', toolLink = null) {
 }
 
 function finishRun(code) {
+  _currentRunId = null;
   const runBtn = document.getElementById('runBtn');
   const cancelBtn = document.getElementById('cancelBtn');
   const status = document.getElementById('terminalStatus');
