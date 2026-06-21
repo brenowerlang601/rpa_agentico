@@ -66,6 +66,17 @@ def init_db() -> None:
         iniciado_em  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         finalizado_em TIMESTAMPTZ
     );
+
+    CREATE TABLE IF NOT EXISTS qa_generated_tests (
+        id            SERIAL PRIMARY KEY,
+        repo_url      TEXT NOT NULL,
+        function_name TEXT NOT NULL,
+        language      TEXT NOT NULL,
+        framework     TEXT NOT NULL,
+        filename      TEXT NOT NULL,
+        test_code     TEXT NOT NULL,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     """
     try:
         with _get_connection() as conn:
@@ -243,6 +254,49 @@ def get_execucoes(limit: int = 100) -> list[dict]:
                 return [dict(r) for r in cur.fetchall()]
     except Exception as e:
         logger.error(f"[DB ERROR] get_execucoes falhou: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# QA Generated Tests CRUD
+# ---------------------------------------------------------------------------
+
+def save_qa_test(
+    repo_url: str,
+    function_name: str,
+    language: str,
+    framework: str,
+    filename: str,
+    test_code: str,
+) -> None:
+    """Persiste um teste gerado pelo módulo QA."""
+    sql = """
+    INSERT INTO qa_generated_tests (repo_url, function_name, language, framework, filename, test_code)
+    VALUES (%s, %s, %s, %s, %s, %s);
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (repo_url, function_name, language, framework, filename, test_code))
+    except Exception as e:
+        logger.error(f"[DB ERROR] save_qa_test('{function_name}') falhou: {e}")
+
+
+def get_qa_tests(limit: int = 100) -> list[dict]:
+    """Retorna os últimos testes gerados, do mais recente para o mais antigo."""
+    sql = """
+    SELECT id, repo_url, function_name, language, framework, filename, created_at
+    FROM qa_generated_tests
+    ORDER BY created_at DESC
+    LIMIT %s;
+    """
+    try:
+        with _get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, (limit,))
+                return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"[DB ERROR] get_qa_tests falhou: {e}")
         return []
 
 

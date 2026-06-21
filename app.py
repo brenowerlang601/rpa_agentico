@@ -667,5 +667,105 @@ def api_review_response():
     return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# QA — Gerador de testes a partir de repositórios de código-fonte
+# ---------------------------------------------------------------------------
+
+@app.route("/api/qa/generate-tests", methods=["POST"])
+def api_qa_generate_tests():
+    """
+    SSE: recebe repo_url + function_name, clona o repo, extrai a função
+    e gera código de teste via LLM.
+
+    Eventos SSE emitidos:
+      __QA_FETCHING__          — clonando/atualizando repositório
+      __QA_FOUND__<json>       — função encontrada: {language, framework, file_path}
+      __QA_GENERATING__        — chamando LLM para gerar testes
+      __QA_DONE__<json>        — {test_code, filename, framework, language}
+      __QA_ERROR__<mensagem>   — erro em qualquer etapa
+    """
+    from qa_code_analyzer import fetch_function_from_repo
+    from qa_test_generator import generate_tests
+
+    data = request.json or {}
+    repo_url = (data.get("repo_url") or "").strip()
+    function_name = (data.get("function_name") or "").strip()
+    hint_file_path = (data.get("file_path") or "").strip()
+    example_params = (data.get("example_params") or "").strip()
+
+    if not repo_url or not function_name:
+        return jsonify({"error": "repo_url e function_name são obrigatórios"}), 400
+
+    def generate():
+        import json as _json
+
+        try:
+            yield "data: __QA_FETCHING__\n\n"
+
+            analysis = fetch_function_from_repo(repo_url, function_name, hint_file_path=hint_file_path)
+
+            found_payload = _json.dumps({
+                "language": analysis["language"],
+                "framework": analysis["framework"],
+                "file_path": analysis["file_path"],
+            }, ensure_ascii=False)
+            yield f"data: __QA_FOUND__{found_payload}\n\n"
+
+            yield "data: __QA_GENERATING__\n\n"
+
+            result = generate_tests(
+                function_name=analysis["function_name"],
+                function_code=analysis["function_code"],
+                file_context=analysis["file_context"],
+                language=analysis["language"],
+                framework=analysis["framework"],
+                example_params=example_params,
+            )
+
+            # Persiste no banco
+            try:
+                from db import save_qa_test
+                save_qa_test(
+                    repo_url=repo_url,
+                    function_name=function_name,
+                    language=result["language"],
+                    framework=result["framework"],
+                    filename=result["filename"],
+                    test_code=result["test_code"],
+                )
+            except Exception as db_err:
+                logging.warning(f"[QA] Falha ao salvar no banco: {db_err}")
+
+            done_payload = _json.dumps({
+                "test_code": result["test_code"],
+                "filename": result["filename"],
+                "framework": result["framework"],
+                "language": result["language"],
+            }, ensure_ascii=False)
+            yield f"data: __QA_DONE__{done_payload}\n\n"
+
+        except Exception as exc:
+            import traceback
+            logging.error(f"[QA] Erro ao gerar testes: {exc}\n{traceback.format_exc()}")
+            yield f"data: __QA_ERROR__{str(exc)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/api/qa/history", methods=["GET"])
+def api_qa_history():
+    """Lista os testes gerados anteriormente."""
+    try:
+        from db import get_qa_tests
+        return jsonify(get_qa_tests())
+    except Exception as e:
+        logging.error(f"[QA] Erro ao buscar histórico: {e}")
+        return jsonify([])
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000, threaded=True)
