@@ -22,6 +22,32 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+class DBError(Exception):
+    """Falha de escrita no banco. O chamador NÃO deve alterar o disco quando isso ocorrer."""
+
+
+def db_enabled() -> bool:
+    """Sem DATABASE_URL o sistema funciona só com o disco (modo local)."""
+    return bool(os.getenv("DATABASE_URL"))
+
+
+def _write(sql: str, params: tuple, label: str) -> None:
+    """
+    Executa uma escrita no banco.
+    Levanta DBError em caso de falha para que o chamador não deixe disco e banco divergentes
+    (o restore_from_db do startup sobrescreveria o disco com a versão antiga do banco).
+    """
+    if not db_enabled():
+        return
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+    except Exception as e:
+        logger.error(f"[DB ERROR] {label} falhou: {e}")
+        raise DBError(f"Erro no banco de dados ({label}): {e}") from e
+
+
 def _get_connection():
     from urllib.parse import urlparse
     url = urlparse(os.getenv("DATABASE_URL"))
@@ -36,6 +62,8 @@ def _get_connection():
 
 def init_db() -> None:
     """Cria tabelas se não existirem. Chamado no startup."""
+    if not db_enabled():
+        return
     sql = """
     CREATE TABLE IF NOT EXISTS tools (
         id          SERIAL PRIMARY KEY,
@@ -101,40 +129,42 @@ def upsert_tool(name: str, code: str, fingerprint: str = "") -> None:
             fingerprint = EXCLUDED.fingerprint,
             updated_at  = NOW();
     """
-    try:
-        with _get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (name, code, fingerprint))
-    except Exception as e:
-        logger.error(f"[DB ERROR] upsert_tool('{name}') falhou: {e}")
+    _write(sql, (name, code, fingerprint), f"upsert_tool('{name}')")
 
 
 def delete_tool(name: str) -> None:
     """Remove tool do banco por nome."""
-    try:
-        with _get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM tools WHERE name = %s", (name,))
-    except Exception as e:
-        logger.error(f"[DB ERROR] delete_tool('{name}') falhou: {e}")
+    _write("DELETE FROM tools WHERE name = %s", (name,), f"delete_tool('{name}')")
 
 
 def rename_tool(old_name: str, new_name: str, new_code: str) -> None:
-    """Atualiza name e code em uma única transação."""
+    """Atualiza name e code em uma única transação. O fingerprint é mantido (as ações são as mesmas)."""
     sql = """
-    UPDATE tools SET name = %s, code = %s, fingerprint = '', updated_at = NOW()
+    UPDATE tools SET name = %s, code = %s, updated_at = NOW()
     WHERE name = %s;
     """
+    _write(sql, (new_name, new_code, old_name), f"rename_tool('{old_name}' → '{new_name}')")
+
+
+def get_tool_fingerprint(name: str) -> str | None:
+    """Fingerprint salvo no banco — usado quando o arquivo não tem o cabeçalho # actions_fp."""
+    if not db_enabled():
+        return None
     try:
         with _get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (new_name, new_code, old_name))
+                cur.execute("SELECT fingerprint FROM tools WHERE name = %s", (name,))
+                row = cur.fetchone()
+                return row[0] if row and row[0] else None
     except Exception as e:
-        logger.error(f"[DB ERROR] rename_tool('{old_name}' → '{new_name}') falhou: {e}")
+        logger.error(f"[DB ERROR] get_tool_fingerprint('{name}') falhou: {e}")
+        return None
 
 
 def get_all_tools() -> list[dict]:
     """Retorna todas as tools do banco."""
+    if not db_enabled():
+        return []
     try:
         with _get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -160,26 +190,18 @@ def upsert_workflow(name: str, code: str, steps: list[str]) -> None:
             steps      = EXCLUDED.steps,
             updated_at = NOW();
     """
-    try:
-        with _get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (name, code, json.dumps(steps)))
-    except Exception as e:
-        logger.error(f"[DB ERROR] upsert_workflow('{name}') falhou: {e}")
+    _write(sql, (name, code, json.dumps(steps)), f"upsert_workflow('{name}')")
 
 
 def delete_workflow(name: str) -> None:
     """Remove workflow do banco por nome."""
-    try:
-        with _get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM workflows WHERE name = %s", (name,))
-    except Exception as e:
-        logger.error(f"[DB ERROR] delete_workflow('{name}') falhou: {e}")
+    _write("DELETE FROM workflows WHERE name = %s", (name,), f"delete_workflow('{name}')")
 
 
 def get_all_workflows() -> list[dict]:
     """Retorna todos os workflows do banco."""
+    if not db_enabled():
+        return []
     try:
         with _get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -192,6 +214,8 @@ def get_all_workflows() -> list[dict]:
 
 def get_workflow_by_id(workflow_id: int) -> dict | None:
     """Retorna um workflow pelo id."""
+    if not db_enabled():
+        return None
     try:
         with _get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -209,6 +233,8 @@ def get_workflow_by_id(workflow_id: int) -> dict | None:
 
 def inserir_execucao(run_id: str, workflow_name: str, steps: list[str], workflow_id: int | None = None) -> None:
     """Registra o início de uma execução."""
+    if not db_enabled():
+        return
     import json
     sql = """
     INSERT INTO execucoes (run_id, workflow_id, workflow_name, steps, status)
@@ -222,9 +248,12 @@ def inserir_execucao(run_id: str, workflow_name: str, steps: list[str], workflow
         logger.error(f"[DB ERROR] inserir_execucao('{run_id}') falhou: {e}")
 
 
-def finalizar_execucao(run_id: str, exit_code: int) -> None:
-    """Atualiza status e exit_code ao fim da execução."""
-    status = "sucesso" if exit_code == 0 else ("cancelado" if exit_code == -15 else "falha")
+def finalizar_execucao(run_id: str, exit_code: int, status: str | None = None) -> None:
+    """Atualiza status e exit_code ao fim da execução. `status` sobrescreve o valor deduzido do exit_code."""
+    if not db_enabled():
+        return
+    if status is None:
+        status = "sucesso" if exit_code == 0 else ("cancelado" if exit_code == -15 else "falha")
     sql = """
     UPDATE execucoes
     SET status = %s, exit_code = %s, finalizado_em = NOW()
@@ -240,6 +269,8 @@ def finalizar_execucao(run_id: str, exit_code: int) -> None:
 
 def get_execucoes(limit: int = 100) -> list[dict]:
     """Retorna as últimas execuções ordenadas pela mais recente."""
+    if not db_enabled():
+        return []
     sql = """
     SELECT id, run_id, workflow_id, workflow_name, steps, status, exit_code,
            iniciado_em, finalizado_em
@@ -270,6 +301,8 @@ def save_qa_test(
     test_code: str,
 ) -> None:
     """Persiste um teste gerado pelo módulo QA."""
+    if not db_enabled():
+        return
     sql = """
     INSERT INTO qa_generated_tests (repo_url, function_name, language, framework, filename, test_code)
     VALUES (%s, %s, %s, %s, %s, %s);
@@ -284,6 +317,8 @@ def save_qa_test(
 
 def get_qa_tests(limit: int = 100) -> list[dict]:
     """Retorna os últimos testes gerados, do mais recente para o mais antigo."""
+    if not db_enabled():
+        return []
     sql = """
     SELECT id, repo_url, function_name, language, framework, filename, created_at
     FROM qa_generated_tests

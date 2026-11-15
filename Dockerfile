@@ -1,8 +1,9 @@
 FROM python:3.13-slim
 
-# Dependências de sistema necessárias para Playwright + psycopg2
+# Dependências de sistema: Playwright + psycopg2 + git (o gerador de testes QA clona repositórios)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    git \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,6 +27,12 @@ COPY templates/ templates/
 RUN mkdir -p tools tests json_rpa
 
 EXPOSE 5000
+
+# Modo "com browser": dentro do container, localhost é o próprio container.
+# O Chrome roda no host, então o padrão aponta para host.docker.internal
+# (no Linux, rode o container com --add-host=host.docker.internal:host-gateway).
+# O script resolve o nome para IP, porque o Chrome recusa conexões CDP com Host que não seja IP/localhost.
+ENV CDP_URL=http://host.docker.internal:9222
 
 # 1 worker + threads para suportar execuções paralelas (SSE + estado em memória exige processo único)
 CMD ["uv", "run", "gunicorn", "-w", "1", "--threads", "20", \

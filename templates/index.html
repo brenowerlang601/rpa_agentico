@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>RPA Workflow Editor</title>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css" />
@@ -14,26 +15,37 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-    /* HEADER */
-    header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 0 20px; height: 56px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
-    header h1 { font-size: 16px; font-weight: 600; color: #a78bfa; letter-spacing: .5px; }
-    .header-sep { flex: 1; }
-    .btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity .15s; }
+    /* HEADER — quebra em duas linhas em telas estreitas em vez de empurrar botões para fora */
+    header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 8px 16px; min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; flex-shrink: 0; }
+    header h1 { font-size: 16px; font-weight: 600; color: #a78bfa; letter-spacing: .5px; white-space: nowrap; flex-shrink: 0; }
+    header .btn, header .headless-toggle, header #cdpUrlWrapper { flex-shrink: 0; white-space: nowrap; }
+    header .workflow-name-input { flex: 0 1 220px; min-width: 110px; width: auto; }
+    .header-sep { flex: 1 1 0; min-width: 0; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: opacity .15s; white-space: nowrap; }
     .btn:hover { opacity: .85; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
     .btn-primary { background: #7c3aed; color: #fff; }
     .btn-success { background: #059669; color: #fff; }
     .btn-outline { background: transparent; color: #a0aec0; border: 1px solid #4a5568; }
     .btn-danger { background: #c53030; color: #fff; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .workflow-name-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 220px; }
+    .workflow-name-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 220px; max-width: 100%; text-overflow: ellipsis; }
+    /* Rótulos opcionais dos botões do header: somem em telas menores (o botão mantém ícone + title) */
+    @media (max-width: 1440px) { header .lbl-opt { display: none; } }
+    @media (max-width: 1100px) {
+      header h1 { display: none; }
+      header { gap: 8px; }
+      header .workflow-name-input { flex-basis: 150px; }
+      header .cdp-url-input { width: 120px; }
+    }
 
     /* LAYOUT */
-    .workspace { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-    .main { display: flex; flex: 1; overflow: hidden; }
+    .workspace { display: flex; flex-direction: column; flex: 1; overflow: hidden; min-height: 0; }
+    .main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
 
     /* MODO TESTE */
     body.test-mode header .hide-in-test { display: none; }
-    body.test-mode header { gap: 10px; }
+    body.test-mode header { gap: 8px 10px; }
     body.test-mode .sidebar { display: none; }
     body.test-mode .preview-panel { display: none; }
     body.test-mode .canvas-header { display: none; }
@@ -41,11 +53,13 @@
     body.test-mode .main { flex: 1; min-width: 0; }
     body.test-mode .canvas-area { border-right: 1px solid #2d3748; }
     body.test-mode .terminal-panel { width: 55%; flex-shrink: 0; border-top: none; border-left: 1px solid #2d3748; height: auto !important; overflow: hidden; display: flex; flex-direction: column; }
-    body.test-mode .terminal-panel.open { height: auto !important; }
+    /* Terminal fechado no modo teste: some de fato (antes o height:auto !important o mantinha visível) */
+    body.test-mode .terminal-panel:not(.open) { display: none; }
     body.test-mode .terminal-output { flex: 1; }
     .btn-test-mode { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
     .btn-test-mode:hover { background: #1d4ed8; opacity: 1; }
     .btn-test-mode.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
+    body.test-mode #testModeBtn .lbl-opt { display: inline; }   /* no modo teste sobra espaço: mostra "Sair do Modo Teste" */
 
     /* Toggle headless */
     .headless-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: #718096; }
@@ -55,43 +69,50 @@
     .headless-toggle input[type=checkbox]:checked::after { transform: translateX(14px); background: #a78bfa; }
     .headless-toggle #headlessLabel { min-width: 52px; }
     #cdpUrlWrapper { display: none; align-items: center; gap: 6px; font-size: 12px; color: #718096; }
-    .cdp-url-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 4px 8px; border-radius: 6px; font-size: 12px; width: 200px; }
+    .cdp-url-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 4px 8px; border-radius: 6px; font-size: 12px; width: 180px; text-overflow: ellipsis; }
     .cdp-url-input::placeholder { color: #4a5568; }
 
     /* TERMINAL */
     .terminal-panel { background: #0a0c14; border-top: 1px solid #2d3748; flex-shrink: 0; display: flex; flex-direction: column; transition: height .2s; height: 0; overflow: hidden; }
-    .terminal-panel.open { height: 220px; }
-    .terminal-header { padding: 6px 14px; border-bottom: 1px solid #1a1d2e; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-    .terminal-header span { font-size: 11px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; flex: 1; }
-    .terminal-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+    .terminal-panel.open { height: min(220px, 30vh); }
+    /* Fechado: botões do header do terminal não ficam focáveis nem "fora da tela" */
+    .terminal-panel:not(.open) { visibility: hidden; }
+    .terminal-header { padding: 6px 14px; border-bottom: 1px solid #1a1d2e; display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-width: 0; }
+    .terminal-header .terminal-title { font-size: 11px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .terminal-header .btn { flex-shrink: 0; }
+    .terminal-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; white-space: nowrap; }
     .terminal-status.running { background: #744210; color: #fbd38d; }
     .terminal-status.ok { background: #1c4532; color: #6ee7b7; }
     .terminal-status.fail { background: #63171b; color: #fc8181; }
-    .terminal-output { flex: 1; overflow-y: auto; padding: 8px 14px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
-    .terminal-output .line { white-space: pre-wrap; word-break: break-all; }
+    .terminal-status.cancel { background: #2d3748; color: #cbd5e0; }
+    .terminal-output { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 14px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; min-height: 0; }
+    .terminal-output .line { white-space: pre-wrap; overflow-wrap: anywhere; }
     .terminal-output .line.ok { color: #6ee7b7; }
-    .terminal-output .line.fail { color: #fc8181; cursor: pointer; text-decoration: underline dotted; }
-    .terminal-output .line.fail:hover { color: #feb2b2; }
+    .terminal-output .line.fail { color: #fc8181; }
+    /* Só as linhas que de fato abrem o editor parecem clicáveis */
+    .terminal-output .line.fail.clickable { cursor: pointer; text-decoration: underline dotted; }
+    .terminal-output .line.fail.clickable:hover { color: #feb2b2; }
     .terminal-output .line.sep { color: #4a5568; }
     .terminal-output .line.dim { color: #718096; }
     .btn-run { background: #d97706; color: #fff; }
     .btn-run:hover { background: #b45309; opacity: 1; }
     .btn-run.running { background: #4a5568; cursor: not-allowed; }
     .btn-cancel { background: #c53030; color: #fff; display: none; }
-    .btn-cancel.visible { display: inline; }
+    .btn-cancel.visible { display: inline-block; }
     .btn-pause { background: #2d3748; color: #a0aec0; border: 1px solid #4a5568; display: none; }
-    .btn-pause.visible { display: inline; }
+    .btn-pause.visible { display: inline-block; }
     .btn-pause.paused { background: #744210; color: #fbd38d; border-color: #d97706; }
 
     /* SIDEBAR — biblioteca de tools */
-    .sidebar { width: 260px; background: #141622; border-right: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
+    .sidebar { width: clamp(220px, 22vw, 260px); background: #141622; border-right: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
     .sidebar-header { padding: 14px 16px; font-size: 12px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; border-bottom: 1px solid #2d3748; }
-    .tool-library { flex: 1; overflow-y: auto; padding: 8px; }
-    .tool-card { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: grab; display: flex; align-items: center; gap: 8px; transition: border-color .15s, background .15s; user-select: none; }
+    .tool-library { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px; min-height: 0; }
+    .tool-card { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: grab; display: flex; align-items: center; gap: 8px; transition: border-color .15s, background .15s; user-select: none; min-width: 0; }
     .tool-card:hover { border-color: #7c3aed; background: #252840; }
-    .tool-card .grip { color: #4a5568; font-size: 14px; }
-    .tool-card .tool-name { font-size: 13px; color: #e2e8f0; word-break: break-all; flex: 1; }
-    .tool-card .card-btn { color: #718096; background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+    .tool-card .grip { color: #4a5568; font-size: 14px; flex-shrink: 0; }
+    /* Nome longo: quebra em qualquer ponto mas limitado a 2 linhas (nome completo no title) */
+    .tool-card .tool-name { font-size: 13px; color: #e2e8f0; flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .tool-card .card-btn { color: #718096; background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; flex-shrink: 0; }
     .tool-card .card-btn:hover { color: #a78bfa; background: #2d3748; }
     .tool-card .card-btn.del:hover { color: #fc8181; background: #2d3748; }
     .tool-card .card-btn.ren:hover { color: #68d391; background: #2d3748; }
@@ -112,27 +133,33 @@
     .tool-segment-body.hidden { display: none; }
 
     /* CANVAS — fluxo atual */
-    .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .canvas-header { padding: 12px 16px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #718096; }
-    .canvas { flex: 1; overflow-y: auto; padding: 12px 16px; }
+    .canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+    .canvas-header { padding: 12px 16px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #718096; min-width: 0; }
+    .canvas-header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .canvas { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 16px; min-height: 0; }
     .drop-zone { min-height: 120px; border: 2px dashed #2d3748; border-radius: 10px; padding: 8px; transition: border-color .2s; }
     .drop-zone.drag-over { border-color: #7c3aed; background: #1a1a2e; }
-    .flow-block { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; }
+    .flow-block { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: grab; transition: border-color .15s, box-shadow .15s; user-select: none; min-width: 0; }
     .flow-block:hover { border-color: #7c3aed; box-shadow: 0 0 0 1px #7c3aed22; }
     .flow-block.pending { border-color: #744210; background: #1a150a; }
+    .flow-block.missing { border-color: #63171b; background: #170b0b; }
     .flow-block.running-now { border-color: #d97706; background: #1a1505; box-shadow: 0 0 0 2px #d9770644; }
     .flow-block.run-ok { border-color: #059669; background: #091a12; }
     .flow-block.run-fail { border-color: #c53030; background: #1a0909; }
     .flow-block .run-indicator { font-size: 13px; animation: pulse 1s infinite; }
+    .flow-block .run-indicator.done { animation: none; }
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
     .flow-block.sortable-ghost { opacity: .4; }
-    .flow-block .step-num { font-size: 11px; color: #4a5568; min-width: 22px; text-align: center; background: #0f1117; border-radius: 4px; padding: 2px 4px; }
-    .flow-block .step-name { font-size: 13px; flex: 1; }
-    .flow-block .step-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #744210; color: #fbd38d; }
-    .flow-block .block-actions { display: flex; gap: 6px; }
+    .flow-block .step-num { font-size: 11px; color: #4a5568; min-width: 22px; text-align: center; background: #0f1117; border-radius: 4px; padding: 2px 4px; flex-shrink: 0; }
+    /* Nome longo trunca com reticências — botões do bloco continuam acessíveis */
+    .flow-block .step-name { font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .flow-block .step-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #744210; color: #fbd38d; flex-shrink: 0; white-space: nowrap; }
+    .flow-block .step-badge.missing { background: #63171b; color: #fc8181; }
+    .flow-block .block-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
     .flow-block .block-btn { background: none; border: none; color: #4a5568; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
-    .flow-block .block-btn:hover { color: #a78bfa; background: #2d3748; }
-    .flow-block .block-btn.remove:hover { color: #fc8181; }
+    .flow-block .block-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .flow-block .block-btn:hover:not(:disabled) { color: #a78bfa; background: #2d3748; }
+    .flow-block .block-btn.remove:hover:not(:disabled) { color: #fc8181; }
     .flow-block .block-btn.bp { font-size: 12px; }
     .flow-block .block-btn.bp:hover { color: #f6ad55; background: #2d3748; }
     .flow-block.has-breakpoint { border-left: 3px solid #e53e3e; }
@@ -142,51 +169,74 @@
     .flow-block .block-btn.sf:hover { color: #68d391; background: #2d3748; }
     .flow-block.has-start-from { border-left: 3px solid #38a169; }
     .flow-block.has-start-from .block-btn.sf { color: #38a169; }
-    .btn-resume-from { display: block; margin: 8px auto 2px; background: #1a3a2a; color: #68d391; border: 1px solid #38a169; border-radius: 6px; padding: 6px 18px; font-size: 13px; cursor: pointer; }
+    .btn-resume-from { display: block; margin: 8px auto 2px; background: #1a3a2a; color: #68d391; border: 1px solid #38a169; border-radius: 6px; padding: 6px 18px; font-size: 13px; cursor: pointer; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
     .btn-resume-from:hover { background: #22543d; }
     .empty-hint { text-align: center; color: #4a5568; font-size: 13px; padding: 40px 20px; }
 
     /* PREVIEW */
-    .preview-panel { width: 380px; background: #141622; border-left: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; }
+    .preview-panel { width: clamp(260px, 30vw, 380px); background: #141622; border-left: 1px solid #2d3748; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
     .preview-header { padding: 14px 16px; font-size: 12px; font-weight: 600; color: #718096; text-transform: uppercase; letter-spacing: .8px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; }
     .preview-header span { flex: 1; }
-    .preview-code { flex: 1; overflow: auto; }
+    .preview-code { flex: 1; overflow: auto; min-height: 0; }
     .preview-code .CodeMirror { height: 100%; font-size: 12px; background: #141622; }
 
-    /* MODAL — editor de tool */
-    .modal-overlay { position: fixed; inset: 0; background: #00000099; display: flex; align-items: center; justify-content: center; z-index: 100; }
+    /* MODAIS — acima do painel QA (200) e abaixo do toast (1000) */
+    .modal-overlay { position: fixed; inset: 0; background: #00000099; display: flex; align-items: center; justify-content: center; z-index: 300; padding: 16px; }
     .modal-overlay.hidden { display: none; }
-    .modal { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 12px; width: 760px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column; }
-    .modal-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; }
-    .modal-title { font-size: 15px; font-weight: 600; flex: 1; }
-    .modal-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-    .modal-body .CodeMirror { height: 480px; font-size: 13px; }
-    #newToolEditorContainer .CodeMirror { height: 420px; font-size: 13px; }
-    .modal-footer { padding: 12px 20px; border-top: 1px solid #2d3748; display: flex; justify-content: flex-end; gap: 8px; }
+    .modal { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 12px; width: 760px; max-width: 100%; max-height: calc(100vh - 32px); display: flex; flex-direction: column; min-width: 0; }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-width: 0; }
+    .modal-header .btn, .modal-header .modal-counter { flex-shrink: 0; }
+    .modal-title { font-size: 15px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .modal-counter { font-size: 12px; color: #718096; white-space: nowrap; }
+    .modal-body { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-body.scroll { overflow-y: auto; }
+    .modal-body .CodeMirror { height: min(480px, 60vh); font-size: 13px; }
+    #newToolEditorContainer .CodeMirror { height: min(420px, 52vh); font-size: 13px; }
+    .modal-footer { padding: 12px 20px; border-top: 1px solid #2d3748; display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+    .field-label { font-size: 12px; color: #718096; display: block; margin-bottom: 6px; }
+    .name-preview { color: #a78bfa; overflow-wrap: anywhere; }
+    .name-box { font-size: 13px; color: #a78bfa; padding: 6px 10px; background: #0f1117; border-radius: 6px; overflow-wrap: anywhere; max-height: 6.5em; overflow-y: auto; }
+    .pick-item { background: #1e2235; border: 1px solid #2d3748; border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; text-align: left; color: inherit; font: inherit; }
+    .pick-item:hover, .pick-item:focus-visible { border-color: #7c3aed; outline: none; }
+    .pick-item .pick-icon { font-size: 20px; color: #7c3aed; flex-shrink: 0; }
+    .pick-item .pick-text { min-width: 0; flex: 1; }
+    .pick-item .pick-title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+    .pick-item .pick-sub { font-size: 12px; color: #718096; margin-top: 4px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .empty-msg { color: #718096; font-size: 13px; }
 
     /* UPLOAD */
-    .upload-area { border: 2px dashed #4a5568; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .2s; margin: 8px; }
+    .upload-area { border: 2px dashed #4a5568; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .2s, opacity .2s; margin: 8px; }
     .upload-area:hover, .upload-area.dragover { border-color: #7c3aed; }
+    .upload-area.disabled { opacity: .45; cursor: not-allowed; border-color: #2d3748; }
     .upload-area input { display: none; }
     .upload-area p { font-size: 13px; color: #718096; margin-top: 6px; }
 
-    /* Toast */
-    #toast { position: fixed; bottom: 20px; right: 20px; background: #1a1d2e; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 16px; font-size: 13px; z-index: 200; opacity: 0; transition: opacity .3s; pointer-events: none; }
+    /* Toast — acima de tudo, com largura máxima */
+    #toast { position: fixed; bottom: 20px; right: 20px; max-width: min(420px, calc(100vw - 40px)); overflow-wrap: anywhere; background: #1a1d2e; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 16px; font-size: 13px; z-index: 1000; opacity: 0; transition: opacity .3s; pointer-events: none; }
     #toast.show { opacity: 1; }
     #toast.ok { border-color: #059669; color: #6ee7b7; }
     #toast.err { border-color: #e53e3e; color: #fc8181; }
+    #toast.warn { border-color: #d97706; color: #fbd38d; }
+    #toast.dim { border-color: #4a5568; color: #a0aec0; }
+
+    /* Barra de geração em andamento (permite reabrir a revisão ou cancelar) */
+    #genBar { position: fixed; left: 16px; bottom: 16px; z-index: 250; max-width: min(560px, calc(100vw - 32px)); background: #1a1d2e; border: 1px solid #7c3aed; border-radius: 8px; padding: 8px 12px; display: none; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+    #genBar.visible { display: flex; }
+    #genBarText { flex: 1 1 180px; min-width: 0; color: #c4b5fd; overflow-wrap: anywhere; }
 
     /* Confirm dialog inline */
-    .confirm-bar { background: #2d1a1a; border: 1px solid #c53030; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-    .confirm-bar span { flex: 1; color: #fc8181; }
+    .confirm-bar { background: #2d1a1a; border: 1px solid #c53030; border-radius: 6px; padding: 8px 12px; margin: -2px 0 8px; font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; cursor: default; }
+    .confirm-bar span { flex: 1 1 120px; min-width: 0; color: #fc8181; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .confirm-bar .btn { flex-shrink: 0; }
 
     /* Modal de revisão de tool */
-    #reviewModal .modal { width: 860px; max-height: 92vh; }
+    #reviewModal .modal { width: 860px; max-height: calc(100vh - 32px); }
     #reviewModal .modal-body { overflow: hidden; }
-    #reviewModal .CodeMirror { height: 380px; font-size: 12px; }
-    .review-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid #2d3748; background: #141622; }
-    .review-toolbar .review-label { font-size: 12px; color: #718096; flex: 1; }
-    #reviewFeedback { flex: 1; background: #1e2235; border: 1px solid #4a5568; border-radius: 6px; padding: 6px 10px; font-size: 13px; color: #e2e8f0; outline: none; display: none; }
+    #reviewModal .CodeMirror { height: min(380px, calc(100vh - 230px)); min-height: 120px; font-size: 12px; }
+    .review-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid #2d3748; background: #141622; flex-shrink: 0; border-radius: 0 0 12px 12px; }
+    .review-toolbar .review-label { font-size: 12px; color: #718096; flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+    .review-toolbar .btn { flex-shrink: 0; }
+    #reviewFeedback { flex: 1 1 220px; min-width: 0; background: #1e2235; border: 1px solid #4a5568; border-radius: 6px; padding: 6px 10px; font-size: 13px; color: #e2e8f0; outline: none; display: none; }
     #reviewFeedback.visible { display: block; }
     .btn-approve { background: #065f46; color: #6ee7b7; border: 1px solid #059669; }
     .btn-approve:hover { background: #047857; }
@@ -195,30 +245,36 @@
     .btn-revise { background: #1e3a5f; color: #93c5fd; border: 1px solid #2563eb; }
     .btn-revise:hover { background: #1d4ed8; }
 
-    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
 
-    /* QA PANEL */
-    .qa-panel { position: fixed; top: 0; right: -520px; width: 520px; height: 100vh; background: #141824; border-left: 1px solid #2d3748; z-index: 200; display: flex; flex-direction: column; transition: right .25s ease; box-shadow: -4px 0 24px rgba(0,0,0,.5); }
-    .qa-panel.open { right: 0; }
-    .qa-panel-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-    .qa-panel-header h2 { font-size: 14px; font-weight: 600; color: #38bdf8; flex: 1; }
-    .qa-panel-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    /* QA PANEL — fechado fica invisível e fora da ordem de foco */
+    .qa-panel { position: fixed; top: 0; right: 0; width: min(520px, 100vw); height: 100vh; background: #141824; border-left: 1px solid #2d3748; z-index: 200; display: flex; flex-direction: column; transform: translateX(100%); visibility: hidden; transition: transform .25s ease, visibility 0s linear .25s; box-shadow: -4px 0 24px rgba(0,0,0,.5); }
+    .qa-panel.open { transform: none; visibility: visible; transition: transform .25s ease, visibility 0s; }
+    .qa-panel-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-width: 0; }
+    .qa-panel-header h2 { font-size: 14px; font-weight: 600; color: #38bdf8; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-panel-header .btn, .qa-panel-header .qa-tabs { flex-shrink: 0; }
+    .qa-panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
     .qa-field label { display: block; font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 5px; }
-    .qa-field input { width: 100%; background: #1a1d2e; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+    .qa-field input { width: 100%; background: #1a1d2e; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 13px; text-overflow: ellipsis; }
     .qa-field input:focus { outline: none; border-color: #38bdf8; }
-    .qa-status-bar { font-size: 12px; color: #718096; padding: 8px 10px; background: #1a1d2e; border-radius: 6px; border: 1px solid #2d3748; min-height: 36px; line-height: 1.5; }
-    .qa-status-bar .qa-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+    .qa-status-bar { font-size: 12px; color: #718096; padding: 8px 10px; background: #1a1d2e; border-radius: 6px; border: 1px solid #2d3748; min-height: 36px; line-height: 1.5; overflow-wrap: anywhere; }
+    .qa-status-bar code { overflow-wrap: anywhere; }
+    .qa-badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: #2d3748; color: #a0aec0; }
+    .qa-status-bar .qa-badge { margin-left: 6px; }
     .qa-badge.java { background: #78350f; color: #fde68a; }
     .qa-badge.javascript { background: #713f12; color: #fef08a; }
     .qa-badge.typescript { background: #1e3a5f; color: #93c5fd; }
     .qa-badge.apex { background: #1c3050; color: #7dd3fc; }
     .qa-code-area { flex: 1; min-height: 300px; background: #0f1117; border: 1px solid #2d3748; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
     .qa-code-area .CodeMirror { height: 100%; min-height: 300px; font-size: 12px; }
-    .qa-code-actions { display: flex; gap: 8px; flex-shrink: 0; }
-    .qa-filename { font-size: 11px; color: #718096; font-family: 'Fira Code', monospace; background: #1a1d2e; padding: 4px 10px; border-radius: 4px; border: 1px solid #2d3748; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .qa-history-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .qa-history-table th { text-align: left; color: #718096; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid #2d3748; }
-    .qa-history-table td { padding: 6px 8px; border-bottom: 1px solid #1a1d2e; color: #a0aec0; }
+    .qa-code-actions { display: flex; gap: 8px; flex-shrink: 0; min-width: 0; }
+    .qa-code-actions .btn { flex-shrink: 0; }
+    .qa-filename { font-size: 11px; color: #718096; font-family: 'Fira Code', monospace; background: #1a1d2e; padding: 4px 10px; border-radius: 4px; border: 1px solid #2d3748; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-history-wrap { overflow-x: auto; max-width: 100%; }
+    .qa-history-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+    .qa-history-table th { text-align: left; color: #718096; font-weight: 600; padding: 6px 8px; border-bottom: 1px solid #2d3748; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-history-table td { padding: 6px 8px; border-bottom: 1px solid #1a1d2e; color: #a0aec0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qa-history-table td.msg { white-space: normal; overflow-wrap: anywhere; }
     .qa-history-table tr:hover td { background: #1a1d2e; }
     .qa-tab { display: none; flex-direction: column; gap: 14px; }
     .qa-tab.active { display: flex; }
@@ -231,12 +287,12 @@
 
 <header>
   <h1 class="hide-in-test">RPA Workflow Editor</h1>
-  <input class="workflow-name-input hide-in-test" id="workflowName" type="text" placeholder="Nome do workflow..." value="Novo Workflow" />
+  <input class="workflow-name-input hide-in-test" id="workflowName" type="text" placeholder="Nome do workflow..." value="Novo Workflow" title="Novo Workflow" />
   <div class="header-sep"></div>
-  <button class="btn btn-outline btn-sm hide-in-test" onclick="loadWorkflow()">Carregar fluxo...</button>
-  <button class="btn btn-success hide-in-test" onclick="saveWorkflow()">Salvar script</button>
-  <button class="btn btn-outline btn-sm hide-in-test" onclick="openQAPanel()" style="color:#38bdf8; border-color:#0ea5e9;" title="Gerar testes a partir de um repositório de código">🧪 Gerar Testes</button>
-  <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()">⬡ Modo Teste</button>
+  <button class="btn btn-outline btn-sm hide-in-test" onclick="loadWorkflow()" title="Carregar fluxo salvo" aria-label="Carregar fluxo">📂<span class="lbl-opt"> Carregar fluxo...</span></button>
+  <button class="btn btn-success hide-in-test" onclick="saveWorkflow()" title="Salvar script">💾 Salvar<span class="lbl-opt"> script</span></button>
+  <button class="btn btn-outline btn-sm hide-in-test" onclick="openQAPanel()" style="color:#38bdf8; border-color:#0ea5e9;" title="Gerar testes a partir de um repositório de código" aria-label="Gerar Testes">🧪<span class="lbl-opt"> Gerar Testes</span></button>
+  <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()" title="Modo Teste (tela compacta)" aria-label="Modo Teste">⬡<span class="lbl-opt"> Modo Teste</span></button>
   <label class="headless-toggle" title="Headless: executa sem abrir janela do browser">
     <input type="checkbox" id="headlessToggle" checked onchange="updateHeadlessLabel()">
     <span id="headlessLabel">Headless</span>
@@ -256,14 +312,14 @@
   <aside class="sidebar">
     <div class="sidebar-header">Tools disponíveis</div>
 
-    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+    <div class="upload-area" id="uploadArea" onclick="openFileDialog()" title="Importar JSON gravado pela extensão">
       <div style="font-size:24px; color:#7c3aed;">+</div>
       <p>Arraste um JSON ou clique para importar</p>
       <input type="file" id="fileInput" accept=".json" onchange="uploadJson(this)" />
     </div>
 
     <div style="padding: 0 8px 4px;">
-      <button class="btn btn-outline" style="width:100%; font-size:12px;" onclick="openJsonPicker()">&#128194; Selecionar JSON existente</button>
+      <button class="btn btn-outline" id="jsonPickerBtn" style="width:100%; font-size:12px;" onclick="openJsonPicker()">&#128194; Selecionar JSON existente</button>
     </div>
     <div style="padding: 0 8px 8px;">
       <button class="btn btn-primary" style="width:100%; font-size:12px;" onclick="openNewToolModal()">&#43; Nova tool</button>
@@ -297,22 +353,25 @@
 <!-- TERMINAL -->
 <div class="terminal-panel" id="terminalPanel">
   <div class="terminal-header">
-    <span>Output de execução</span>
+    <span class="terminal-title">Output de execução</span>
     <span class="terminal-status" id="terminalStatus" style="display:none"></span>
     <button class="btn btn-outline btn-sm" onclick="clearTerminal()">Limpar</button>
-    <button class="btn btn-outline btn-sm" onclick="closeTerminal()">&#10005;</button>
+    <button class="btn btn-outline btn-sm" onclick="closeTerminal()" title="Fechar terminal" aria-label="Fechar terminal">&#10005;</button>
   </div>
   <div class="terminal-output" id="terminalOutput"></div>
 </div>
 
 </div><!-- /.workspace -->
 
-<!-- MODAL: revisão de tool gerada pelo LLM -->
-<div class="modal-overlay hidden" id="reviewModal">
+<!-- MODAL: revisão de tool gerada pelo LLM
+     Esc / clique no fundo / botão "Minimizar" apenas MINIMIZAM a revisão (nada é descartado);
+     a barra no canto inferior esquerdo permite reabrir ou cancelar a geração. -->
+<div class="modal-overlay hidden" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title" id="reviewTitle">Revisar tool gerada</span>
-      <span style="font-size:12px; color:#718096; margin-left:8px;" id="reviewCounter"></span>
+      <span class="modal-counter" id="reviewCounter"></span>
+      <button class="btn btn-outline btn-sm" onclick="minimizeReviewModal()" title="Minimizar (Esc) — a revisão continua pendente">Minimizar</button>
     </div>
     <div class="modal-body">
       <div id="reviewEditorContainer"></div>
@@ -320,15 +379,15 @@
     <div class="review-toolbar">
       <span class="review-label" id="reviewStatusLabel">Revise o código gerado e escolha uma ação:</span>
       <input id="reviewFeedback" type="text" placeholder="Descreva a ressalva ou correção desejada..." />
-      <button class="btn btn-revise btn-sm" onclick="submitRevise()">↩ Ressalva</button>
-      <button class="btn btn-reject btn-sm" onclick="submitReview('reject')">✕ Rejeitar</button>
-      <button class="btn btn-approve btn-sm" onclick="submitReview('approve')">✓ Aprovar</button>
+      <button class="btn btn-revise btn-sm review-action" onclick="submitRevise()">↩ Ressalva</button>
+      <button class="btn btn-reject btn-sm review-action" onclick="submitReview('reject')">✕ Rejeitar</button>
+      <button class="btn btn-approve btn-sm review-action" onclick="submitReview('approve')">✓ Aprovar</button>
     </div>
   </div>
 </div>
 
 <!-- MODAL: editor de código da tool -->
-<div class="modal-overlay hidden" id="editorModal">
+<div class="modal-overlay hidden" id="editorModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title" id="modalTitle">Editando tool</span>
@@ -337,153 +396,359 @@
     <div class="modal-body" id="editorContainer"></div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveTool()">Salvar tool</button>
+      <button class="btn btn-primary" id="saveToolBtn" onclick="saveTool()">Salvar tool</button>
     </div>
   </div>
 </div>
 
 <!-- MODAL: salvar script -->
-<div class="modal-overlay hidden" id="saveModal">
+<div class="modal-overlay hidden" id="saveModal" role="dialog" aria-modal="true">
   <div class="modal" style="width:420px;">
     <div class="modal-header">
       <span class="modal-title">Salvar script</span>
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('saveModal').classList.add('hidden')">Fechar</button>
+      <button class="btn btn-outline btn-sm" onclick="hideModal('saveModal')">Fechar</button>
     </div>
-    <div class="modal-body" style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+    <div class="modal-body scroll" style="padding:20px; gap:14px;">
       <div>
-        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Nome do workflow (usado no relatório)</label>
+        <label class="field-label" for="saveWorkflowName">Nome do workflow (usado no relatório)</label>
         <input class="workflow-name-input" id="saveWorkflowName" type="text" placeholder="Ex: Login QA" style="width:100%;" />
       </div>
       <div>
-        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Nome do arquivo de script <span style="color:#4a5568;">(sem .py)</span></label>
+        <label class="field-label" for="saveScriptName">Nome do arquivo de script <span style="color:#4a5568;">(sem .py)</span></label>
         <input class="workflow-name-input" id="saveScriptName" type="text" placeholder="Ex: test_login_qa" style="width:100%;" />
-        <p style="font-size:11px; color:#4a5568; margin-top:4px;">Será salvo como <span id="saveFilePreview" style="color:#a78bfa;">test_login_qa.py</span></p>
+        <p style="font-size:11px; color:#4a5568; margin-top:4px; overflow-wrap:anywhere;">Será salvo como <span id="saveFilePreview" class="name-preview">test_login_qa.py</span></p>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="document.getElementById('saveModal').classList.add('hidden')">Cancelar</button>
-      <button class="btn btn-success" onclick="confirmSave()">Salvar</button>
+      <button class="btn btn-outline" onclick="hideModal('saveModal')">Cancelar</button>
+      <button class="btn btn-success" id="confirmSaveBtn" onclick="confirmSave()">Salvar</button>
     </div>
   </div>
 </div>
 
 <!-- MODAL: renomear tool -->
-<div class="modal-overlay hidden" id="renameModal">
+<div class="modal-overlay hidden" id="renameModal" role="dialog" aria-modal="true">
   <div class="modal" style="width:400px;">
     <div class="modal-header">
       <span class="modal-title">Renomear tool</span>
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('renameModal').classList.add('hidden')">Fechar</button>
+      <button class="btn btn-outline btn-sm" onclick="closeRenameModal()">Fechar</button>
     </div>
-    <div class="modal-body" style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+    <div class="modal-body scroll" style="padding:20px; gap:14px;">
       <div>
-        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Nome atual</label>
-        <div id="renameOldName" style="font-size:13px; color:#a78bfa; padding:6px 10px; background:#0f1117; border-radius:6px;"></div>
+        <span class="field-label">Nome atual</span>
+        <div id="renameOldName" class="name-box"></div>
       </div>
       <div>
-        <label style="font-size:12px; color:#718096; display:block; margin-bottom:6px;">Novo nome</label>
+        <label class="field-label" for="renameNewName">Novo nome</label>
         <input class="workflow-name-input" id="renameNewName" type="text" placeholder="Ex: fazer_login_sistema" style="width:100%;" />
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="document.getElementById('renameModal').classList.add('hidden')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmRename()">Renomear</button>
+      <button class="btn btn-outline" onclick="closeRenameModal()">Cancelar</button>
+      <button class="btn btn-primary" id="confirmRenameBtn" onclick="confirmRename()">Renomear</button>
     </div>
   </div>
 </div>
 
 <!-- MODAL: selecionar JSON existente -->
-<div class="modal-overlay hidden" id="jsonPickerModal">
+<div class="modal-overlay hidden" id="jsonPickerModal" role="dialog" aria-modal="true">
   <div class="modal" style="width:480px;">
     <div class="modal-header">
       <span class="modal-title">Selecionar JSON existente</span>
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('jsonPickerModal').classList.add('hidden')">Fechar</button>
+      <button class="btn btn-outline btn-sm" onclick="hideModal('jsonPickerModal')">Fechar</button>
     </div>
-    <div class="modal-body" style="padding:16px; overflow-y:auto; max-height:400px;">
+    <div class="modal-body scroll" style="padding:16px; max-height:min(400px, 70vh);">
       <div id="jsonFileList"></div>
     </div>
   </div>
 </div>
 
 <!-- MODAL: carregar fluxo existente -->
-<div class="modal-overlay hidden" id="loadModal">
+<div class="modal-overlay hidden" id="loadModal" role="dialog" aria-modal="true">
   <div class="modal" style="width:480px;">
     <div class="modal-header">
       <span class="modal-title">Carregar fluxo existente</span>
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('loadModal').classList.add('hidden')">Fechar</button>
+      <button class="btn btn-outline btn-sm" onclick="hideModal('loadModal')">Fechar</button>
     </div>
-    <div class="modal-body" style="padding:16px; overflow-y:auto; max-height:400px;">
+    <div class="modal-body scroll" style="padding:16px; max-height:min(400px, 70vh);">
       <div id="workflowList"></div>
     </div>
   </div>
 </div>
 
 <!-- MODAL: nova tool -->
-<div class="modal-overlay hidden" id="newToolModal">
+<div class="modal-overlay hidden" id="newToolModal" role="dialog" aria-modal="true">
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title">Nova tool</span>
       <button class="btn btn-outline btn-sm" onclick="closeNewToolModal()">Fechar</button>
     </div>
-    <div class="modal-body" style="display:flex; flex-direction:column; gap:0;">
-      <div style="padding:12px 20px 8px; display:flex; align-items:center; gap:10px;">
-        <label style="font-size:12px; color:#718096; white-space:nowrap;">Nome da tool:</label>
-        <input class="workflow-name-input" id="newToolName" type="text" placeholder="Ex: fazer_login_sistema" style="flex:1;" />
+    <div class="modal-body" style="gap:0;">
+      <div style="padding:12px 20px 8px; display:flex; align-items:center; gap:10px; min-width:0;">
+        <label for="newToolName" style="font-size:12px; color:#718096; white-space:nowrap;">Nome da tool:</label>
+        <input class="workflow-name-input" id="newToolName" type="text" placeholder="Ex: fazer_login_sistema" style="flex:1; min-width:0;" />
       </div>
-      <div id="newToolEditorContainer" style="flex:1;"></div>
+      <div id="newToolEditorContainer" style="flex:1; min-height:0;"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeNewToolModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmNewTool()">Criar tool</button>
+      <button class="btn btn-primary" id="confirmNewToolBtn" onclick="confirmNewTool()">Criar tool</button>
     </div>
   </div>
 </div>
 
-<div id="toast"></div>
+<!-- Barra de geração em andamento -->
+<div id="genBar" role="status" aria-live="polite">
+  <span id="genBarText"></span>
+  <button class="btn btn-primary btn-sm" id="genBarReopen" onclick="reopenReviewModal()" style="display:none;">Reabrir revisão</button>
+  <button class="btn btn-outline btn-sm" onclick="cancelGeneration()">Cancelar geração</button>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
+// ─── Utilitários ──────────────────────────────────────────────────────────────
+// Nomes de tool válidos (mesma regra do backend)
+const TOOL_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function $(id) { return document.getElementById(id); }
+
+// Escapa texto para uso seguro em HTML (nunca interpolar nomes vindos do servidor sem isso)
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Cria elementos via DOM (textContent + addEventListener) — evita innerHTML/onclick inline com dados externos
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'style') node.style.cssText = v;
+    else if (k === 'dataset') Object.assign(node.dataset, v);
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const c of [].concat(children)) {
+    if (c === null || c === undefined || c === false) continue;
+    node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return node;
+}
+
+// URL de uma tool, sempre com encodeURIComponent
+function toolUrl(name, suffix = '') { return `/api/tool/${encodeURIComponent(name)}${suffix}`; }
+
+// fetch + JSON: lança Error com a mensagem do servidor ({error}) quando !response.ok
+async function apiJson(url, options = {}) {
+  let resp;
+  try {
+    resp = await fetch(url, options);
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    throw new Error('Falha de conexão com o servidor');
+  }
+  let data = null;
+  try { data = await resp.json(); } catch { data = null; }
+  if (!resp.ok) {
+    const err = new Error((data && data.error) || `Erro ${resp.status} no servidor`);
+    err.status = resp.status;
+    err.data = data;
+    throw err;
+  }
+  if (data === null) throw new Error('Resposta inválida do servidor');
+  return data;
+}
+
+function postJson(url, body, extra = {}) {
+  return apiJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), ...extra });
+}
+
+// Extrai a mensagem de erro de uma resposta !ok (JSON {error} ou status)
+async function errorFromResponse(resp) {
+  try {
+    const d = await resp.json();
+    return (d && d.error) || `Erro ${resp.status} no servidor`;
+  } catch {
+    return `Erro ${resp.status} no servidor`;
+  }
+}
+
+// Lê um stream SSE e chama onData(linha) para cada evento "data: ...".
+// Se onData retornar false a leitura é encerrada. Erros de rede/abort são propagados.
+async function readSSE(resp, onData) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();
+    for (const part of parts) {
+      const dataLines = part.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(l.startsWith('data: ') ? 6 : 5));
+      if (!dataLines.length) continue;
+      if (onData(dataLines.join('\n')) === false) {
+        try { reader.cancel(); } catch { /* ignora */ }
+        return 'stopped';
+      }
+    }
+  }
+  return 'eof';
+}
+
+function parseJsonSafe(s) { try { return JSON.parse(s); } catch { return null; } }
+
+// run_id gerado no frontend (^[A-Za-z0-9_-]{4,64}$) — funciona também fora de contexto seguro
+function genRunId() {
+  try {
+    const a = new Uint8Array(12);
+    crypto.getRandomValues(a);
+    return 'run_' + Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return 'run_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+}
+
 // ─── Estado global ───────────────────────────────────────────────────────────
 let allTools = [];        // [{name, code}]
 let flowSteps = [];       // [toolName, ...]
-let pendingSteps = new Set(); // tools ainda sendo geradas
-let breakpointStep = null;    // nome da tool onde a execução deve parar
-let startFromStep  = null;    // nome da tool a partir de onde iniciar (retomada)
-let _lastFailedStep = null;   // último step que falhou (para botão de retomada)
+let pendingSteps = new Set(); // tools que a geração em andamento ainda vai produzir
+let breakpointIdx = null;     // índice (em flowSteps) antes do qual a execução para
+let startFromIdx  = null;     // índice (em flowSteps) a partir do qual iniciar (uma vez)
+let _stepMarks = { running: null, results: {} }; // destaques de execução por índice
 let currentEditTool = null;
 let renamingTool = null;
 let editorCM = null;
+let _editorCleanGen = null;
 let previewCM = null;
+let _flowSortable = null;
+let _gen = null;          // geração de tools em andamento (ver startToolGeneration)
+let _importBusy = false;  // upload/load-json em andamento
+let _run = null;          // execução em andamento (ver runWorkflow)
+
+function toolNameSet() { return new Set(allTools.map(t => t.name)); }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initPreview();
   loadTools();
   initDropZone();
+  initLibraryEvents();
   initUploadDrag();
+  initModals();
 
-  document.getElementById('saveScriptName').addEventListener('input', function() {
-    const val = this.value.trim() || 'workflow';
-    document.getElementById('saveFilePreview').textContent = val + '.py';
+  $('workflowName').addEventListener('input', function () {
+    this.title = this.value;
+    refreshPreview(300);
   });
 
-  document.getElementById('renameNewName').addEventListener('keydown', e => {
+  $('saveScriptName').addEventListener('input', function () {
+    const val = this.value.trim() || 'workflow';
+    $('saveFilePreview').textContent = val + '.py';
+    this.title = this.value;
+  });
+  $('saveWorkflowName').addEventListener('input', function () { this.title = this.value; });
+  ['saveWorkflowName', 'saveScriptName'].forEach(id => $(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmSave();
+  }));
+
+  $('renameNewName').addEventListener('keydown', e => {
     if (e.key === 'Enter') confirmRename();
   });
+  $('renameNewName').addEventListener('input', function () { this.title = this.value; });
+
+  $('cdpUrlInput').addEventListener('input', function () { this.title = this.value; });
+
+  $('reviewFeedback').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitRevise();
+  });
+
+  let newToolTimer = null;
+  $('newToolName').addEventListener('input', function () {
+    this.title = this.value;
+    clearTimeout(newToolTimer);
+    newToolTimer = setTimeout(syncNewToolName, 250);
+  });
+
+  // Avisa antes de fechar a aba com geração ou execução em andamento
+  window.addEventListener('beforeunload', e => {
+    if (_gen || _run) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  refreshPreview(0);
 });
+
+// ─── Modais: pilha, Esc e clique no fundo ────────────────────────────────────
+const _modalStack = [];
+
+// Ação de "fechar" de cada modal (Esc, clique no fundo)
+const MODAL_CLOSE_HANDLERS = {
+  reviewModal: () => minimizeReviewModal(),   // nunca descarta: apenas minimiza
+  editorModal: () => closeModal(),
+  newToolModal: () => closeNewToolModal(),
+  renameModal: () => closeRenameModal(),
+};
+
+function openModal(id) {
+  const m = $(id);
+  m.classList.remove('hidden');
+  const i = _modalStack.indexOf(id);
+  if (i !== -1) _modalStack.splice(i, 1);
+  _modalStack.push(id);
+}
+
+function hideModal(id) {
+  $(id).classList.add('hidden');
+  const i = _modalStack.indexOf(id);
+  if (i !== -1) _modalStack.splice(i, 1);
+}
+
+function requestCloseModal(id) {
+  (MODAL_CLOSE_HANDLERS[id] || (() => hideModal(id)))();
+}
+
+function initModals() {
+  document.querySelectorAll('.modal-overlay').forEach(ov => {
+    // Só fecha se o clique começou E terminou no fundo (evita fechar ao arrastar seleção de texto)
+    let downOnBg = false;
+    ov.addEventListener('mousedown', e => { downOnBg = e.target === ov; });
+    ov.addEventListener('click', e => {
+      if (e.target === ov && downOnBg) requestCloseModal(ov.id);
+      downOnBg = false;
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const top = _modalStack[_modalStack.length - 1];
+    if (top) { e.preventDefault(); requestCloseModal(top); return; }
+    if ($('qaPanel').classList.contains('open')) closeQAPanel();
+  });
+}
 
 // ─── Preview CodeMirror ───────────────────────────────────────────────────────
 function initPreview() {
-  previewCM = CodeMirror(document.getElementById('previewContainer'), {
+  previewCM = CodeMirror($('previewContainer'), {
     mode: 'python', theme: 'dracula', lineNumbers: true,
-    readOnly: true, lineWrapping: false,
+    readOnly: true, lineWrapping: true,
   });
 }
 
 // ─── Carregar tools da API ────────────────────────────────────────────────────
-function loadTools() {
-  fetch('/api/tools').then(r => r.json()).then(tools => {
-    allTools = tools;
-    renderLibrary();
-  });
+async function loadTools() {
+  try {
+    const tools = await apiJson('/api/tools');
+    allTools = Array.isArray(tools) ? tools : [];
+  } catch (e) {
+    toast(`Erro ao carregar tools: ${e.message}`, 'err');
+    return;
+  }
+  renderLibrary();
+  renderFlow();
 }
 
 // ─── Categorização de tools por tipo de ação ──────────────────────────────────
@@ -500,7 +765,7 @@ const TOOL_SEGMENTS = [
 const _segCollapsed = {};
 
 function classifyTool(name) {
-  const n = name.toLowerCase();
+  const n = String(name).toLowerCase();
   for (const seg of TOOL_SEGMENTS) {
     if (seg.key === 'outras') continue;
     if (seg.terms.some(t => n.includes(t))) return seg.key;
@@ -508,31 +773,47 @@ function classifyTool(name) {
   return 'outras';
 }
 
+// Card da biblioteca. Os cliques são tratados por delegação em #toolLibrary
+// (o Sortable em modo clone deixa uma cópia sem listeners na biblioteca).
 function _makeToolCard(tool) {
-  const card = document.createElement('div');
-  card.className = 'tool-card';
-  card.dataset.tool = tool.name;
-  card.innerHTML = `
-    <span class="grip">⠿</span>
-    <span class="tool-name">${tool.name}</span>
-    <button class="card-btn ren" title="Renomear" onclick="openRename('${tool.name}', event)">✏</button>
-    <button class="card-btn" title="Editar código" onclick="openEditor('${tool.name}', event)">⊞</button>
-    <button class="card-btn del" title="Deletar tool" onclick="deleteTool('${tool.name}', event)">✕</button>
-  `;
-  card.addEventListener('dblclick', () => addToFlow(tool.name));
-  return card;
+  return el('div', { class: 'tool-card', dataset: { tool: tool.name } }, [
+    el('span', { class: 'grip', 'aria-hidden': 'true', text: '⠿' }),
+    el('span', { class: 'tool-name', text: tool.name, title: tool.name }),
+    el('button', { type: 'button', class: 'card-btn ren', title: 'Renomear', 'aria-label': 'Renomear', dataset: { action: 'rename' }, text: '✏' }),
+    el('button', { type: 'button', class: 'card-btn', title: 'Editar código', 'aria-label': 'Editar código', dataset: { action: 'edit' }, text: '⊞' }),
+    el('button', { type: 'button', class: 'card-btn del', title: 'Deletar tool', 'aria-label': 'Deletar tool', dataset: { action: 'delete' }, text: '✕' }),
+  ]);
+}
+
+function initLibraryEvents() {
+  const lib = $('toolLibrary');
+  lib.addEventListener('click', e => {
+    const btn = e.target.closest('.card-btn');
+    if (!btn) return;
+    const card = btn.closest('.tool-card');
+    if (!card) return;
+    e.stopPropagation();
+    const name = card.dataset.tool;
+    if (btn.dataset.action === 'rename') openRename(name);
+    else if (btn.dataset.action === 'edit') openEditor(name);
+    else if (btn.dataset.action === 'delete') deleteTool(name, card);
+  });
+  lib.addEventListener('dblclick', e => {
+    if (e.target.closest('.card-btn')) return;
+    const card = e.target.closest('.tool-card');
+    if (card) addToFlow(card.dataset.tool);
+  });
 }
 
 function renderLibrary() {
-  const lib = document.getElementById('toolLibrary');
+  const lib = $('toolLibrary');
   lib.innerHTML = '';
 
   // Agrupa tools por segmento
   const groups = {};
   TOOL_SEGMENTS.forEach(s => { groups[s.key] = []; });
   allTools.forEach(tool => {
-    const key = classifyTool(tool.name);
-    groups[key].push(tool);
+    groups[classifyTool(tool.name)].push(tool);
   });
 
   TOOL_SEGMENTS.forEach(seg => {
@@ -540,19 +821,13 @@ function renderLibrary() {
     if (tools.length === 0) return;
 
     const collapsed = !!_segCollapsed[seg.key];
-
-    const wrap = document.createElement('div');
-    wrap.className = 'tool-segment';
-    wrap.dataset.seg = seg.key;
-
-    const header = document.createElement('div');
-    header.className = 'tool-segment-header' + (collapsed ? ' collapsed' : '');
-    header.innerHTML = `
-      <span class="seg-icon">${seg.icon}</span>
-      <span>${seg.label}</span>
-      <span class="seg-count">${tools.length}</span>
-      <span class="seg-chevron">▾</span>
-    `;
+    const body = el('div', { class: 'tool-segment-body' + (collapsed ? ' hidden' : '') });
+    const header = el('div', { class: 'tool-segment-header' + (collapsed ? ' collapsed' : '') }, [
+      el('span', { class: 'seg-icon', text: seg.icon }),
+      el('span', { text: seg.label }),
+      el('span', { class: 'seg-count', text: String(tools.length) }),
+      el('span', { class: 'seg-chevron', text: '▾' }),
+    ]);
     header.addEventListener('click', () => {
       const isNowCollapsed = !_segCollapsed[seg.key];
       _segCollapsed[seg.key] = isNowCollapsed;
@@ -560,64 +835,144 @@ function renderLibrary() {
       body.classList.toggle('hidden', isNowCollapsed);
     });
 
-    const body = document.createElement('div');
-    body.className = 'tool-segment-body' + (collapsed ? ' hidden' : '');
-
     tools.forEach(tool => body.appendChild(_makeToolCard(tool)));
-
-    wrap.appendChild(header);
-    wrap.appendChild(body);
-    lib.appendChild(wrap);
+    lib.appendChild(el('div', { class: 'tool-segment', dataset: { seg: seg.key } }, [header, body]));
   });
 
   initLibrarySortable();
-  updatePendingBadges();
 }
 
 // ─── Drag-and-drop: biblioteca → canvas ──────────────────────────────────────
 function initLibrarySortable() {
-  // Inicializa Sortable em cada segment-body (drag clone → canvas)
+  // Inicializa Sortable em cada segment-body (drag clone → canvas).
+  // Só .tool-card é arrastável — a .confirm-bar de deleção nunca vai para o canvas.
   document.querySelectorAll('.tool-segment-body').forEach(segBody => {
     Sortable.create(segBody, {
       group: { name: 'tools', pull: 'clone', put: false },
       sort: false,
+      draggable: '.tool-card',
+      filter: '.card-btn',
+      preventOnFilter: false,
       animation: 150,
       ghostClass: 'sortable-ghost',
     });
   });
 }
 
+// Posição do item entre os .flow-block (ignora o aviso de canvas vazio e qualquer outro nó)
+function _flowIndexOf(item) {
+  let i = 0;
+  for (let n = item.previousElementSibling; n; n = n.previousElementSibling) {
+    if (n.classList.contains('flow-block')) i++;
+  }
+  return i;
+}
+
 function initDropZone() {
-  const zone = document.getElementById('dropZone');
-  Sortable.create(zone, {
+  // Criado uma única vez — renderFlow não recria o Sortable
+  const zone = $('dropZone');
+  _flowSortable = Sortable.create(zone, {
     group: { name: 'tools', pull: false, put: true },
+    draggable: '.flow-block',
+    filter: '.block-btn',
+    preventOnFilter: false,
     animation: 150,
     ghostClass: 'sortable-ghost',
     onAdd(evt) {
-      const toolName = evt.item.dataset.tool;
-      evt.item.remove();
-      const insertIdx = evt.newIndex;
-      flowSteps.splice(insertIdx, 0, toolName);
-      renderFlow();
-      refreshPreview();
+      const item = evt.item;
+      const insertIdx = _flowIndexOf(item);
+      const toolName = item.dataset.tool;
+      const isToolCard = item.classList.contains('tool-card');
+      item.remove();
+      if (!isToolCard || !toolName) return;  // só cards de tool entram no fluxo
+      insertStep(insertIdx, toolName);
     },
-    onUpdate() {
-      syncFlowFromDOM();
-      refreshPreview();
+    onUpdate(evt) {
+      const from = parseInt(evt.item.dataset.idx, 10);
+      const to = _flowIndexOf(evt.item);
+      moveStep(from, to);
     },
   });
 }
 
-function syncFlowFromDOM() {
-  const blocks = document.querySelectorAll('#dropZone .flow-block');
-  flowSteps = Array.from(blocks).map(b => b.dataset.tool);
+// ─── Mutação do fluxo (mantém breakpoint/início coerentes com os índices) ─────
+function _flowLocked() {
+  if (_run) { toast('O fluxo não pode ser alterado durante a execução', 'warn'); return true; }
+  return false;
+}
+
+function _remapMarkers(fn) {
+  breakpointIdx = breakpointIdx === null ? null : fn(breakpointIdx);
+  startFromIdx  = startFromIdx  === null ? null : fn(startFromIdx);
+}
+
+function _clearRunMarks() { _stepMarks = { running: null, results: {} }; }
+
+function insertStep(idx, toolName) {
+  if (_flowLocked()) { renderFlow(); return; }
+  idx = Math.max(0, Math.min(idx, flowSteps.length));
+  flowSteps.splice(idx, 0, toolName);
+  _remapMarkers(i => (i >= idx ? i + 1 : i));
+  _clearRunMarks();
+  renderFlow();
+  refreshPreview();
+}
+
+function moveStep(from, to) {
+  if (isNaN(from) || from < 0 || from >= flowSteps.length || from === to || _run) { renderFlow(); return; }
+  const [name] = flowSteps.splice(from, 1);
+  flowSteps.splice(to, 0, name);
+  _remapMarkers(i => {
+    if (i === from) return to;
+    if (from < to && i > from && i <= to) return i - 1;
+    if (from > to && i >= to && i < from) return i + 1;
+    return i;
+  });
+  _clearRunMarks();
+  renderFlow();   // re-renderiza: cada bloco volta a ter o índice correto (corrige o ✕)
+  refreshPreview();
+}
+
+function _removeAt(idx) {
+  flowSteps.splice(idx, 1);
+  _remapMarkers(i => (i === idx ? null : i > idx ? i - 1 : i));
+}
+
+function removeStep(idx, evt) {
+  if (evt) evt.stopPropagation();
+  if (_flowLocked()) return;
+  if (idx < 0 || idx >= flowSteps.length) return;
+  _removeAt(idx);
+  _clearRunMarks();
+  renderFlow();
+  refreshPreview();
+}
+
+// Remove todas as ocorrências de uma tool do fluxo
+function _removeAllFromFlow(name) {
+  let changed = false;
+  for (let i = flowSteps.length - 1; i >= 0; i--) {
+    if (flowSteps[i] === name) { _removeAt(i); changed = true; }
+  }
+  if (changed) _clearRunMarks();
+  return changed;
+}
+
+function _setFlow(steps) {
+  flowSteps = Array.isArray(steps) ? steps.slice() : [];
+  breakpointIdx = null;
+  startFromIdx = null;
+  _clearRunMarks();
 }
 
 // ─── Render do fluxo ─────────────────────────────────────────────────────────
 function renderFlow() {
-  const zone = document.getElementById('dropZone');
-  const hint = document.getElementById('emptyHint');
+  const zone = $('dropZone');
+  const hint = $('emptyHint');
   zone.querySelectorAll('.flow-block').forEach(b => b.remove());
+
+  if (breakpointIdx !== null && breakpointIdx >= flowSteps.length) breakpointIdx = null;
+  if (startFromIdx !== null && startFromIdx >= flowSteps.length) startFromIdx = null;
 
   if (flowSteps.length === 0) {
     hint.style.display = '';
@@ -625,354 +980,588 @@ function renderFlow() {
   }
   hint.style.display = 'none';
 
-  const existingNames = new Set(allTools.map(t => t.name));
+  const existingNames = toolNameSet();
 
   flowSteps.forEach((name, idx) => {
-    const isPending = !existingNames.has(name);
-    const block = document.createElement('div');
-    block.className = 'flow-block' + (isPending ? ' pending' : '');
-    block.dataset.tool = name;
-    block.innerHTML = `
-      <span class="step-num">${idx + 1}</span>
-      <span class="step-name">${name}</span>
-      ${isPending ? '<span class="step-badge">gerando...</span>' : ''}
-      <div class="block-actions">
-        <button class="block-btn sf" title="Executar a partir deste step" onclick="setStartFrom('${name}')">↩</button>
-        <button class="block-btn bp" title="Parar antes deste step (breakpoint)" onclick="toggleBreakpoint('${name}', event)">⬤</button>
-        <button class="block-btn" title="Editar código" onclick="openEditor('${name}', event)" ${isPending ? 'disabled style="opacity:.4"' : ''}>✎</button>
-        <button class="block-btn remove" title="Remover" onclick="removeStep(${idx})">✕</button>
-      </div>
-    `;
+    const exists = existingNames.has(name);
+    const isPending = !exists && pendingSteps.has(name);
+    const isMissing = !exists && !isPending;
+    const block = el('div', {
+      class: 'flow-block' + (isPending ? ' pending' : '') + (isMissing ? ' missing' : ''),
+      dataset: { tool: name, idx: String(idx) },
+    }, [
+      el('span', { class: 'step-num', text: String(idx + 1) }),
+      el('span', { class: 'step-name', text: name, title: name }),
+      isPending ? el('span', { class: 'step-badge', text: 'gerando...' }) : null,
+      isMissing ? el('span', { class: 'step-badge missing', text: 'ausente', title: 'Esta tool não existe (não foi gerada, foi rejeitada ou deletada)' }) : null,
+      el('div', { class: 'block-actions' }, [
+        el('button', { type: 'button', class: 'block-btn sf', title: 'Executar a partir deste step', 'aria-label': 'Executar a partir deste step', text: '↩', onclick: e => toggleStartFrom(idx, e) }),
+        el('button', { type: 'button', class: 'block-btn bp', title: 'Parar antes deste step (breakpoint)', 'aria-label': 'Breakpoint', text: '⬤', onclick: e => toggleBreakpoint(idx, e) }),
+        el('button', { type: 'button', class: 'block-btn edit', title: 'Editar código', 'aria-label': 'Editar código', text: '✎', disabled: !exists, onclick: e => openEditor(name, e) }),
+        el('button', { type: 'button', class: 'block-btn remove', title: 'Remover', 'aria-label': 'Remover do fluxo', text: '✕', onclick: e => removeStep(idx, e) }),
+      ]),
+    ]);
     zone.appendChild(block);
   });
 
-  initDropZone();
+  _applyFlowMarkers();
+  applyStepMarks();
 }
 
-function updatePendingBadges() {
-  // Atualiza os blocos do canvas com base nas tools que agora existem
-  const existingNames = new Set(allTools.map(t => t.name));
+// Compatibilidade: badges são recalculados no render
+function updatePendingBadges() { renderFlow(); }
+
+function _applyFlowMarkers() {
   document.querySelectorAll('#dropZone .flow-block').forEach(block => {
-    const name = block.dataset.tool;
-    const isPending = !existingNames.has(name);
-    block.classList.toggle('pending', isPending);
-    const badge = block.querySelector('.step-badge');
-    if (!isPending && badge) badge.remove();
-    const editBtn = block.querySelector('.block-btn:not(.remove)');
-    if (editBtn) {
-      editBtn.disabled = isPending;
-      editBtn.style.opacity = isPending ? '.4' : '';
-    }
+    const idx = parseInt(block.dataset.idx, 10);
+    block.classList.toggle('has-breakpoint', idx === breakpointIdx);
+    block.classList.toggle('has-start-from', idx === startFromIdx);
   });
 }
 
 function addToFlow(toolName) {
-  flowSteps.push(toolName);
-  renderFlow();
-  refreshPreview();
+  insertStep(flowSteps.length, toolName);
 }
 
-function removeStep(idx) {
-  flowSteps.splice(idx, 1);
-  renderFlow();
-  refreshPreview();
+// ─── Preview (debounce + descarta respostas antigas) ─────────────────────────
+let _previewTimer = null;
+let _previewSeq = 0;
+let _previewCtrl = null;
+
+function refreshPreview(delay = 150) {
+  clearTimeout(_previewTimer);
+  _previewTimer = setTimeout(_doRefreshPreview, delay);
 }
 
-// ─── Preview ─────────────────────────────────────────────────────────────────
-function refreshPreview() {
-  const name = document.getElementById('workflowName').value || 'workflow';
-  fetch('/api/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: name, steps: flowSteps }),
-  }).then(r => r.json()).then(data => {
-    previewCM.setValue(data.script);
-  });
+async function _doRefreshPreview() {
+  const seq = ++_previewSeq;
+  if (_previewCtrl) _previewCtrl.abort();
+  const ctrl = _previewCtrl = new AbortController();
+  const name = $('workflowName').value || 'workflow';
+  try {
+    const data = await postJson('/api/preview', { workflow_name: name, steps: flowSteps.slice() }, { signal: ctrl.signal });
+    if (seq !== _previewSeq) return;
+    previewCM.setValue(typeof data.script === 'string' ? data.script : '');
+  } catch (e) {
+    if (e.name === 'AbortError' || seq !== _previewSeq) return;
+    previewCM.setValue(`# Não foi possível gerar o preview:\n# ${String(e.message).replace(/\n/g, '\n# ')}`);
+  }
 }
-
-document.getElementById('workflowName').addEventListener('input', refreshPreview);
 
 // ─── Editor de tool ──────────────────────────────────────────────────────────
-function openEditor(toolName, evt) {
+async function openEditor(toolName, evt) {
   if (evt) evt.stopPropagation();
+  let data;
+  try {
+    data = await apiJson(toolUrl(toolName));
+  } catch (e) {
+    toast(`Erro ao abrir "${toolName}": ${e.message}`, 'err');
+    return;
+  }
   currentEditTool = toolName;
-  document.getElementById('modalTitle').textContent = `Editando: ${toolName}.py`;
-
-  fetch(`/api/tool/${toolName}`).then(r => r.json()).then(data => {
-    if (data.error) { toast(data.error, 'err'); return; }
-    document.getElementById('editorModal').classList.remove('hidden');
-    const container = document.getElementById('editorContainer');
-    container.innerHTML = '';
-    editorCM = CodeMirror(container, {
-      value: data.code,
-      mode: 'python',
-      theme: 'dracula',
-      lineNumbers: true,
-      indentUnit: 4,
-      tabSize: 4,
-      indentWithTabs: false,
-      lineWrapping: false,
-      extraKeys: { Tab: cm => cm.replaceSelection('    ') },
-    });
-    setTimeout(() => editorCM.refresh(), 50);
+  const title = $('modalTitle');
+  title.textContent = `Editando: ${toolName}.py`;
+  title.title = title.textContent;
+  openModal('editorModal');
+  const container = $('editorContainer');
+  container.innerHTML = '';
+  editorCM = CodeMirror(container, {
+    value: typeof data.code === 'string' ? data.code : '',
+    mode: 'python',
+    theme: 'dracula',
+    lineNumbers: true,
+    indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    lineWrapping: false,
+    extraKeys: { Tab: cm => cm.replaceSelection('    ') },
   });
+  _editorCleanGen = editorCM.changeGeneration();
+  setTimeout(() => editorCM && editorCM.refresh(), 50);
 }
 
-function closeModal() {
-  document.getElementById('editorModal').classList.add('hidden');
+function closeModal(force = false) {
+  if (!force && editorCM && !editorCM.isClean(_editorCleanGen)
+      && !confirm('Descartar as alterações não salvas desta tool?')) return;
+  hideModal('editorModal');
   editorCM = null;
   currentEditTool = null;
 }
 
-function saveTool() {
+async function saveTool() {
   if (!editorCM || !currentEditTool) return;
   const code = editorCM.getValue();
-  fetch(`/api/tool/${currentEditTool}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
-  }).then(r => r.json()).then(() => {
-    toast('Tool salva com sucesso!', 'ok');
-    const t = allTools.find(t => t.name === currentEditTool);
-    if (t) t.code = code;
-    closeModal();
-  });
+  const name = currentEditTool;
+  const btn = $('saveToolBtn');
+  btn.disabled = true;
+  try {
+    await postJson(toolUrl(name), { code });
+  } catch (e) {
+    toast(`Erro ao salvar "${name}": ${e.message}`, 'err');
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  const t = allTools.find(t => t.name === name);
+  if (t) t.code = code;
+  toast('Tool salva com sucesso!', 'ok');
+  closeModal(true);
 }
 
 // ─── Deletar tool ────────────────────────────────────────────────────────────
-function deleteTool(toolName, evt) {
-  if (evt) evt.stopPropagation();
-
-  // Confirmação inline na própria card
-  const card = document.querySelector(`.tool-card[data-tool="${toolName}"]`);
+function deleteTool(toolName, card) {
   if (!card) return;
-
   // Evita duplicar confirm
-  if (card.querySelector('.confirm-bar')) return;
+  const next = card.nextElementSibling;
+  if (next && next.classList.contains('confirm-bar')) return;
 
-  const bar = document.createElement('div');
-  bar.className = 'confirm-bar';
-  bar.innerHTML = `
-    <span>Deletar "${toolName}"?</span>
-    <button class="btn btn-danger btn-sm" onclick="confirmDeleteTool('${toolName}')">Deletar</button>
-    <button class="btn btn-outline btn-sm" onclick="this.closest('.confirm-bar').remove()">Cancelar</button>
-  `;
+  // Confirmação inline logo abaixo do card
+  const bar = el('div', { class: 'confirm-bar' });
+  bar.append(
+    el('span', { text: `Deletar "${toolName}"?`, title: toolName }),
+    el('button', { type: 'button', class: 'btn btn-danger btn-sm', text: 'Deletar', onclick: () => confirmDeleteTool(toolName, bar) }),
+    el('button', { type: 'button', class: 'btn btn-outline btn-sm', text: 'Cancelar', onclick: () => bar.remove() }),
+  );
   card.after(bar);
 }
 
-function confirmDeleteTool(toolName) {
-  fetch(`/api/tool/${toolName}`, { method: 'DELETE' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { toast(data.error, 'err'); return; }
-      allTools = allTools.filter(t => t.name !== toolName);
-      renderLibrary();
-      toast(`Tool "${toolName}" deletada`, 'ok');
-    });
+async function confirmDeleteTool(toolName, bar, force = false) {
+  if (_run && flowSteps.includes(toolName)) {
+    toast('Não é possível deletar uma tool do fluxo durante a execução', 'warn');
+    return;
+  }
+  const btns = bar ? bar.querySelectorAll('button') : [];
+  btns.forEach(b => { b.disabled = true; });
+  let data;
+  try {
+    data = await apiJson(toolUrl(toolName) + (force ? '?force=1' : ''), { method: 'DELETE' });
+  } catch (e) {
+    btns.forEach(b => { b.disabled = false; });
+    if (e.status === 409 && !force) {
+      const wfs = (e.data && Array.isArray(e.data.workflows)) ? e.data.workflows : [];
+      const msg = `A tool "${toolName}" é usada nos workflows salvos:\n\n`
+        + (wfs.length ? wfs.map(w => `• ${w}`).join('\n') : '• (não informado)')
+        + '\n\nDeletar mesmo assim? Esses workflows serão afetados.';
+      if (confirm(msg)) return confirmDeleteTool(toolName, bar, true);
+      if (bar) bar.remove();
+      return;
+    }
+    toast(`Erro ao deletar "${toolName}": ${e.message}`, 'err');
+    return;
+  }
+  // Remove a tool da biblioteca e TODAS as ocorrências do fluxo
+  allTools = allTools.filter(t => t.name !== toolName);
+  pendingSteps.delete(toolName);
+  _removeAllFromFlow(toolName);
+  renderLibrary();
+  renderFlow();
+  refreshPreview();
+  const aff = Array.isArray(data.workflows_affected) ? data.workflows_affected : [];
+  toast(`Tool "${toolName}" deletada` + (aff.length ? ` — workflows afetados: ${aff.join(', ')}` : ''), aff.length ? 'warn' : 'ok', aff.length ? 6000 : undefined);
 }
 
 // ─── Renomear tool ────────────────────────────────────────────────────────────
-function openRename(toolName, evt) {
-  if (evt) evt.stopPropagation();
+function openRename(toolName) {
   renamingTool = toolName;
-  document.getElementById('renameOldName').textContent = toolName;
-  document.getElementById('renameNewName').value = toolName;
-  document.getElementById('renameModal').classList.remove('hidden');
-  setTimeout(() => {
-    const inp = document.getElementById('renameNewName');
-    inp.focus();
-    inp.select();
-  }, 50);
+  $('renameOldName').textContent = toolName;
+  $('renameOldName').title = toolName;
+  const inp = $('renameNewName');
+  inp.value = toolName;
+  inp.title = toolName;
+  openModal('renameModal');
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
 }
 
-function confirmRename() {
-  const newName = document.getElementById('renameNewName').value.trim();
-  if (!newName || !renamingTool) return;
+function closeRenameModal() {
+  hideModal('renameModal');
+  renamingTool = null;
+}
 
-  fetch(`/api/tool/${renamingTool}/rename`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ new_name: newName }),
-  }).then(r => r.json()).then(data => {
-    if (data.error) { toast(data.error, 'err'); return; }
-    const finalName = data.new_name;
-    // Atualiza allTools local
-    const t = allTools.find(t => t.name === renamingTool);
-    if (t) t.name = finalName;
-    // Atualiza flowSteps se a tool estava no fluxo
-    flowSteps = flowSteps.map(s => s === renamingTool ? finalName : s);
-    document.getElementById('renameModal').classList.add('hidden');
-    renamingTool = null;
-    renderLibrary();
-    renderFlow();
-    refreshPreview();
-    toast(`Tool renomeada para "${finalName}"`, 'ok');
-  });
+async function confirmRename() {
+  const newName = $('renameNewName').value.trim();
+  const oldName = renamingTool;
+  if (!newName || !oldName) return;
+  if (newName === oldName) { closeRenameModal(); return; }
+  if (!TOOL_NAME_RE.test(newName)) {
+    toast('Nome inválido: use apenas letras, números e _ (sem começar com número)', 'err');
+    return;
+  }
+  const btn = $('confirmRenameBtn');
+  btn.disabled = true;
+  let data;
+  try {
+    data = await postJson(toolUrl(oldName, '/rename'), { new_name: newName });
+  } catch (e) {
+    toast(`Erro ao renomear: ${e.message}`, 'err');
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  const finalName = data.new_name || newName;
+  _applyRenameLocally(oldName, finalName);
+  closeRenameModal();
+  const upd = Array.isArray(data.workflows_updated) ? data.workflows_updated : [];
+  toast(`Tool renomeada para "${finalName}"` + (upd.length ? ` — workflows atualizados: ${upd.join(', ')}` : ''), 'ok');
+  loadTools();  // recarrega o código atualizado pelo servidor
+}
+
+// Troca o nome em allTools (incl. código), flowSteps e estados locais.
+// Breakpoint/início são por índice, então continuam no mesmo bloco.
+function _applyRenameLocally(oldName, newName) {
+  const t = allTools.find(t => t.name === oldName);
+  if (t) {
+    t.name = newName;
+    if (typeof t.code === 'string') t.code = t.code.replace(new RegExp(`\\b${escapeRegex(oldName)}\\b`, 'g'), newName);
+  }
+  flowSteps = flowSteps.map(s => (s === oldName ? newName : s));
+  if (pendingSteps.delete(oldName)) pendingSteps.add(newName);
+  if (currentEditTool === oldName) currentEditTool = newName;
+  renderLibrary();
+  renderFlow();
+  refreshPreview();
 }
 
 // ─── Upload de JSON ──────────────────────────────────────────────────────────
-function uploadJson(input) {
-  const file = input.files[0];
-  if (!file) return;
-  doUpload(file);
-  input.value = '';
+// Bloqueia nova importação enquanto houver geração/importação/execução ativa
+function _importBlocked() {
+  if (_gen) {
+    toast('Já existe uma geração de tools em andamento. Conclua ou cancele antes de importar outro JSON.', 'warn', 5000);
+    return true;
+  }
+  if (_importBusy) { toast('Aguarde a importação atual terminar', 'warn'); return true; }
+  if (_run) { toast('Aguarde a execução terminar antes de importar', 'warn'); return true; }
+  return false;
 }
 
-function doUpload(file) {
+function _updateImportUI() {
+  const blocked = !!(_gen || _importBusy);
+  $('uploadArea').classList.toggle('disabled', blocked);
+  $('jsonPickerBtn').disabled = blocked;
+}
+
+function openFileDialog() {
+  if (_importBlocked()) return;
+  $('fileInput').click();
+}
+
+function uploadJson(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  doUpload(file);
+}
+
+async function doUpload(file) {
+  if (_importBlocked()) return;
   const form = new FormData();
   form.append('file', file);
-  toast('Importando JSON...', 'ok');
-  fetch('/api/upload', { method: 'POST', body: form })
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { toast(data.error, 'err'); return; }
-      document.getElementById('workflowName').value = data.workflow_name;
-      flowSteps = data.steps;
-      pendingSteps = new Set(data.steps);
-      renderFlow();
-      refreshPreview();
-      startToolGeneration(data.named_steps);
-    })
-    .catch(() => toast('Erro ao processar o arquivo', 'err'));
+  _importBusy = true;
+  _updateImportUI();
+  toast('Importando JSON...', 'dim');
+  let data;
+  try {
+    data = await apiJson('/api/upload', { method: 'POST', body: form });
+  } catch (e) {
+    toast(`Erro ao importar o arquivo: ${e.message}`, 'err');
+    return;
+  } finally {
+    _importBusy = false;
+    _updateImportUI();
+  }
+  _applyImportedFlow(data);
+}
+
+function _applyImportedFlow(data) {
+  if (Array.isArray(data.tools)) allTools = data.tools;
+  $('workflowName').value = data.workflow_name || 'Novo Workflow';
+  $('workflowName').title = $('workflowName').value;
+  _setFlow(data.steps);
+  const names = toolNameSet();
+  pendingSteps = new Set(flowSteps.filter(s => !names.has(s)));
+  renderLibrary();
+  renderFlow();
+  refreshPreview();
+  startToolGeneration(Array.isArray(data.named_steps) ? data.named_steps : []);
 }
 
 // ─── Geração interativa de tools ──────────────────────────────────────────────
-
 let _reviewCM = null;
-let _reviewResolve = null; // resolve da Promise aguardando resposta do usuário
 
-function startToolGeneration(namedSteps) {
-  if (!namedSteps || namedSteps.length === 0) return;
-  const newTools = namedSteps.filter(s => !allTools.find(t => t.name === s.tool_name));
+async function startToolGeneration(namedSteps) {
+  const names = toolNameSet();
+  const newTools = (namedSteps || []).filter(s => s && !names.has(s.tool_name));
   if (newTools.length === 0) {
     pendingSteps.clear();
     renderFlow();
-    toast('Todas as tools já existem.', 'ok');
+    if (namedSteps && namedSteps.length) toast('Todas as tools já existem.', 'ok');
     return;
   }
+  if (_gen) {  // nunca duas gerações ao mesmo tempo nesta aba
+    toast('Já existe uma geração de tools em andamento.', 'warn');
+    return;
+  }
+  const gen = _gen = {
+    id: null, ctrl: new AbortController(), total: newTools.length, count: 0,
+    current: null, reviewName: null, reviewCode: '', awaiting: false, busy: false,
+    minimized: false, failed: [], finished: false,
+  };
+  _updateImportUI();
+  updateGenBar();
   toast(`Gerando ${newTools.length} tool(s) — aguardando aprovação...`, 'ok');
 
-  fetch('/api/generate-tools', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ named_steps: namedSteps }),
-  }).then(response => {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+  let resp;
+  try {
+    resp = await fetch('/api/generate-tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ named_steps: namedSteps }),
+      signal: gen.ctrl.signal,
+    });
+  } catch (e) {
+    endGeneration(gen, e.name === 'AbortError' ? 'cancelled' : 'error', 'falha de conexão ao iniciar a geração');
+    return;
+  }
+  if (!resp.ok) {
+    endGeneration(gen, 'error', await errorFromResponse(resp));
+    return;
+  }
 
-    function read() {
-      reader.read().then(({ done, value }) => {
-        if (done) return;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop();
-        for (const part of parts) {
-          if (!part.startsWith('data: ')) continue;
-          const line = part.slice(6);
-          handleGenerationEvent(line);
-        }
-        read();
-      });
-    }
-    read();
-  }).catch(e => toast(`Erro na geração: ${e}`, 'err'));
+  let gotDone = false;
+  try {
+    await readSSE(resp, line => {
+      if (gen.finished) return false;
+      if (line === '__GENERATE_DONE__') { gotDone = true; return false; }
+      handleGenerationEvent(gen, line);
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') endGeneration(gen, 'cancelled');
+    else endGeneration(gen, 'error', 'conexão com o servidor perdida durante a geração');
+    return;
+  }
+  if (gotDone) endGeneration(gen, 'done');
+  else endGeneration(gen, 'error', 'o servidor encerrou a geração antes do fim');
 }
 
-function handleGenerationEvent(line) {
-  if (line.startsWith('__GENERATING__')) {
+// Finaliza a geração (idempotente): fecha o modal e tira o "gerando..." das tools restantes
+function endGeneration(gen, status, msg = '') {
+  if (gen.finished) return;
+  gen.finished = true;
+  if (_gen === gen) _gen = null;
+  closeReviewModal();
+  pendingSteps.clear();
+  _updateImportUI();
+  updateGenBar();
+  renderFlow();
+  if (status === 'done') {
+    if (gen.failed.length) toast(`Geração concluída — ${gen.failed.length} tool(s) não gerada(s): ${gen.failed.join(', ')}`, 'warn', 7000);
+    else toast('Geração concluída!', 'ok');
+  } else if (status === 'cancelled') {
+    toast('Geração cancelada. Tools não aprovadas não foram salvas.', 'warn', 5000);
+  } else {
+    toast(`Erro na geração: ${msg}. As tools pendentes não foram geradas.`, 'err', 7000);
+  }
+  loadTools();
+}
+
+function cancelGeneration() {
+  const gen = _gen;
+  if (!gen) return;
+  if (!confirm('Cancelar a geração de tools?\n\nA tool em revisão (se houver) será descartada e as restantes não serão geradas.')) return;
+  gen.ctrl.abort();   // abortar o fetch encerra a geração no servidor
+  endGeneration(gen, 'cancelled');
+}
+
+function handleGenerationEvent(gen, line) {
+  if (line.startsWith('__GEN_ID__')) {
+    gen.id = line.slice('__GEN_ID__'.length).trim();
+
+  } else if (line.startsWith('__GENERATING__')) {
     const name = line.slice('__GENERATING__'.length);
-    toast(`Gerando: ${name}...`, 'ok');
+    gen.count = Math.min(gen.count + 1, gen.total);
+    gen.current = name;
+    updateGenBar();
+    toast(`Gerando: ${name}...`, 'dim');
+
+  } else if (line.startsWith('__GEN_ERROR__')) {
+    const payload = parseJsonSafe(line.slice('__GEN_ERROR__'.length)) || {};
+    const name = String(payload.name ?? '?');
+    pendingSteps.delete(name);
+    gen.failed.push(name);
+    if (gen.reviewName === name) closeReviewModal();
+    renderFlow();
+    toast(`Falha ao gerar "${name}": ${payload.error ?? 'erro desconhecido'}`, 'err', 6000);
 
   } else if (line.startsWith('__REVIEW__')) {
-    const payload = JSON.parse(line.slice('__REVIEW__'.length));
-    openReviewModal(payload.name, payload.code);
+    const payload = parseJsonSafe(line.slice('__REVIEW__'.length));
+    if (!payload || typeof payload.name !== 'string') {
+      toast('Resposta inválida do servidor na revisão da tool', 'err');
+      return;
+    }
+    openReviewModal(gen, payload.name, typeof payload.code === 'string' ? payload.code : '');
 
   } else if (line.startsWith('__SKIP__')) {
     const name = line.slice('__SKIP__'.length);
     pendingSteps.delete(name);
     renderFlow();
-    updatePendingBadges();
+
+  } else if (line.startsWith('__REVISING__')) {
+    const name = line.slice('__REVISING__'.length);
+    $('reviewFeedback').classList.remove('visible');
+    $('reviewFeedback').value = '';
+    setReviewBusy(gen, true, `Regerando ${name} com sua ressalva...`);
+    updateGenBar();
 
   } else if (line.startsWith('__APPROVED__')) {
     const name = line.slice('__APPROVED__'.length);
+    const code = gen.reviewName === name ? gen.reviewCode : '';
     closeReviewModal();
     pendingSteps.delete(name);
-    fetch('/api/tools').then(r => r.json()).then(tools => {
-      allTools = tools;
-      renderLibrary();
-      renderFlow();
-      updatePendingBadges();
-      toast(`✓ Tool aprovada: ${name}`, 'ok');
-    });
+    if (!allTools.some(t => t.name === name)) allTools.push({ name, code });
+    renderLibrary();
+    renderFlow();
+    toast(`✓ Tool aprovada: ${name}`, 'ok');
+    loadTools();
 
   } else if (line.startsWith('__REJECTED__')) {
     const name = line.slice('__REJECTED__'.length);
     closeReviewModal();
     pendingSteps.delete(name);
-    flowSteps = flowSteps.filter(s => s !== name);
+    _removeAllFromFlow(name);
     allTools = allTools.filter(t => t.name !== name);
     renderLibrary();
     renderFlow();
     refreshPreview();
-    toast(`✕ Tool rejeitada e removida: ${name}`, 'err');
+    toast(`✕ Tool rejeitada e removida do fluxo: ${name}`, 'warn');
 
-  } else if (line.startsWith('__REVISING__')) {
-    const name = line.slice('__REVISING__'.length);
-    document.getElementById('reviewStatusLabel').textContent = `Regerando ${name} com sua ressalva...`;
-    document.getElementById('reviewFeedback').classList.remove('visible');
-    document.getElementById('reviewFeedback').value = '';
-
-  } else if (line === '__GENERATE_DONE__') {
-    pendingSteps.clear();
+  } else if (line.startsWith('__REVIEW_TIMEOUT__')) {
+    const name = line.slice('__REVIEW_TIMEOUT__'.length);
+    closeReviewModal();
+    pendingSteps.delete(name);
+    gen.failed.push(name);
     renderFlow();
-    updatePendingBadges();
-    toast('Geração concluída!', 'ok');
+    toast(`Tempo de revisão esgotado para "${name}" — tool descartada`, 'warn', 6000);
   }
 }
 
-function openReviewModal(name, code) {
-  document.getElementById('reviewTitle').textContent = `Revisar tool: ${name}`;
-  document.getElementById('reviewStatusLabel').textContent = 'Revise o código gerado e escolha uma ação:';
-  document.getElementById('reviewFeedback').classList.remove('visible');
-  document.getElementById('reviewFeedback').value = '';
+function openReviewModal(gen, name, code) {
+  const sameTool = gen.awaiting && gen.reviewName === name;
+  gen.reviewName = name;
+  gen.reviewCode = code;
+  gen.awaiting = true;
+  if (!sameTool) gen.minimized = false;   // tool nova: abre; nova versão da mesma tool respeita "minimizado"
 
-  const container = document.getElementById('reviewEditorContainer');
+  const title = $('reviewTitle');
+  title.textContent = `Revisar tool: ${name}`;
+  title.title = name;
+  $('reviewCounter').textContent = gen.total ? `(${Math.max(gen.count, 1)} de ${gen.total})` : '';
+  $('reviewFeedback').classList.remove('visible');
+  $('reviewFeedback').value = '';
+
+  const container = $('reviewEditorContainer');
+  if (_reviewCM) { _reviewCM.toTextArea(); _reviewCM = null; }
   container.innerHTML = '';
   const textarea = document.createElement('textarea');
   container.appendChild(textarea);
   textarea.value = code;
-
-  if (_reviewCM) { _reviewCM.toTextArea(); _reviewCM = null; }
+  // Somente leitura: o servidor salva o código que ele gerou (o contrato não envia código editado).
+  // Para mudar algo use "Ressalva", ou edite a tool depois de aprovada.
   _reviewCM = CodeMirror.fromTextArea(textarea, {
     mode: 'python', theme: 'dracula', lineNumbers: true,
-    indentUnit: 4, tabSize: 4, lineWrapping: false, readOnly: false,
+    indentUnit: 4, tabSize: 4, lineWrapping: false, readOnly: true,
   });
-  setTimeout(() => _reviewCM.refresh(), 50);
+  setReviewBusy(gen, false, 'Revise o código gerado (somente leitura) e escolha uma ação:');
 
-  document.getElementById('reviewModal').classList.remove('hidden');
+  if (gen.minimized) {
+    toast(`Nova versão de "${name}" pronta para revisão`, 'ok');
+  } else {
+    openModal('reviewModal');
+    setTimeout(() => _reviewCM && _reviewCM.refresh(), 50);
+  }
+  updateGenBar();
 }
 
+// Fecha de vez (revisão resolvida ou geração encerrada)
 function closeReviewModal() {
-  document.getElementById('reviewModal').classList.add('hidden');
+  hideModal('reviewModal');
   if (_reviewCM) { _reviewCM.toTextArea(); _reviewCM = null; }
+  $('reviewEditorContainer').innerHTML = '';
+  if (_gen) {
+    _gen.awaiting = false;
+    _gen.reviewName = null;
+    _gen.minimized = false;
+    _gen.busy = false;
+  }
+  updateGenBar();
 }
 
-function submitReview(action) {
-  const feedback = document.getElementById('reviewFeedback').value.trim();
-  fetch('/api/review-response', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, feedback }),
-  });
-  // A UI será atualizada quando chegar o evento SSE de resposta (__APPROVED__ / __REJECTED__)
+// Esc / fundo / "Minimizar": esconde sem responder — nada é descartado
+function minimizeReviewModal() {
+  if (!_gen || !_gen.awaiting) { closeReviewModal(); return; }
+  _gen.minimized = true;
+  hideModal('reviewModal');
+  updateGenBar();
+  toast('Revisão minimizada — reabra pela barra no canto inferior esquerdo', 'dim');
+}
+
+function reopenReviewModal() {
+  if (!_gen || !_gen.awaiting) return;
+  _gen.minimized = false;
+  openModal('reviewModal');
+  setTimeout(() => _reviewCM && _reviewCM.refresh(), 50);
+  updateGenBar();
+}
+
+function setReviewBusy(gen, busy, label) {
+  gen.busy = busy;
+  document.querySelectorAll('#reviewModal .review-action').forEach(b => { b.disabled = busy; });
+  $('reviewFeedback').disabled = busy;
+  if (label) $('reviewStatusLabel').textContent = label;
+}
+
+function updateGenBar() {
+  const bar = $('genBar');
+  const gen = _gen;
+  if (!gen) { bar.classList.remove('visible'); return; }
+  bar.classList.add('visible');
+  const reviewHidden = $('reviewModal').classList.contains('hidden');
+  const canReopen = gen.awaiting && reviewHidden;
+  let text;
+  if (canReopen) text = `⏳ Revisão pendente: ${gen.reviewName}` + (gen.busy ? ' (regerando...)' : '');
+  else if (gen.current) text = `⚙ Gerando tools (${gen.count} de ${gen.total}): ${gen.current}`;
+  else text = `⚙ Gerando ${gen.total} tool(s)...`;
+  $('genBarText').textContent = text;
+  $('genBarText').title = text;
+  $('genBarReopen').style.display = canReopen ? '' : 'none';
+}
+
+async function submitReview(action) {
+  const gen = _gen;
+  if (!gen || !gen.awaiting || gen.busy) return;
+  if (!gen.id) { toast('A geração ainda não tem identificador do servidor — aguarde', 'err'); return; }
+  const feedback = $('reviewFeedback').value.trim();
+  const labels = { approve: 'Aprovando...', reject: 'Rejeitando...', revise: 'Enviando ressalva...' };
+  const prevLabel = $('reviewStatusLabel').textContent;
+  setReviewBusy(gen, true, labels[action] || 'Enviando...');
+  try {
+    await postJson('/api/review-response', { gen_id: gen.id, action, feedback });
+    // Sucesso: botões ficam desabilitados até o próximo evento SSE (__APPROVED__/__REJECTED__/__REVIEW__)
+  } catch (e) {
+    if (gen.finished) return;
+    if (e.status === 404) {
+      gen.ctrl.abort();
+      endGeneration(gen, 'error', `geração desconhecida pelo servidor (${e.message})`);
+      return;
+    }
+    setReviewBusy(gen, false, prevLabel);
+    toast(`Não foi possível enviar a resposta: ${e.message}`, 'err');
+  }
 }
 
 function submitRevise() {
-  const feedback = document.getElementById('reviewFeedback').value.trim();
+  const fb = $('reviewFeedback');
+  const feedback = fb.value.trim();
   if (!feedback) {
     // Mostra o campo se ainda não estava visível
-    const fb = document.getElementById('reviewFeedback');
     fb.classList.add('visible');
     fb.focus();
     return;
@@ -982,7 +1571,7 @@ function submitRevise() {
 
 // Drag-and-drop de arquivo na área de upload
 function initUploadDrag() {
-  const area = document.getElementById('uploadArea');
+  const area = $('uploadArea');
   area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
   area.addEventListener('dragleave', () => area.classList.remove('dragover'));
   area.addEventListener('drop', e => {
@@ -990,261 +1579,393 @@ function initUploadDrag() {
     area.classList.remove('dragover');
     const file = e.dataTransfer.files[0];
     if (file && file.name.endsWith('.json')) doUpload(file);
+    else if (file) toast('Apenas arquivos .json são aceitos', 'err');
   });
 }
 
 // ─── Selecionar JSON existente ────────────────────────────────────────────────
-function openJsonPicker() {
-  fetch('/api/json-files').then(r => r.json()).then(files => {
-    const list = document.getElementById('jsonFileList');
-    if (files.length === 0) {
-      list.innerHTML = '<p style="color:#718096; font-size:13px;">Nenhum JSON encontrado na pasta json_rpa/.</p>';
-    } else {
-      list.innerHTML = files.map(f => `
-        <div style="background:#1e2235; border:1px solid #2d3748; border-radius:8px; padding:12px; margin-bottom:8px; cursor:pointer; display:flex; align-items:center; gap:10px;"
-             onclick="loadJsonFile('${f.name}')">
-          <span style="font-size:20px; color:#7c3aed;">&#128196;</span>
-          <div>
-            <div style="font-size:14px; font-weight:500;">${f.name}</div>
-          </div>
-        </div>
-      `).join('');
-    }
-    document.getElementById('jsonPickerModal').classList.remove('hidden');
-  });
+async function openJsonPicker() {
+  if (_importBlocked()) return;
+  let files;
+  try {
+    files = await apiJson('/api/json-files');
+  } catch (e) {
+    toast(`Erro ao listar JSONs: ${e.message}`, 'err');
+    return;
+  }
+  const list = $('jsonFileList');
+  list.innerHTML = '';
+  if (!Array.isArray(files) || files.length === 0) {
+    list.appendChild(el('p', { class: 'empty-msg', text: 'Nenhum JSON encontrado na pasta json_rpa/.' }));
+  } else {
+    files.forEach(f => {
+      list.appendChild(el('button', { type: 'button', class: 'pick-item', title: f.name, onclick: () => loadJsonFile(f.name) }, [
+        el('span', { class: 'pick-icon', text: '📄' }),
+        el('div', { class: 'pick-text' }, [el('div', { class: 'pick-title', text: String(f.name) })]),
+      ]));
+    });
+  }
+  openModal('jsonPickerModal');
 }
 
-function loadJsonFile(filename) {
-  document.getElementById('jsonPickerModal').classList.add('hidden');
-  toast('Carregando JSON...', 'ok');
-  fetch('/api/load-json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename }),
-  }).then(r => r.json()).then(data => {
-    if (data.error) { toast(data.error, 'err'); return; }
-    document.getElementById('workflowName').value = data.workflow_name;
-    flowSteps = data.steps;
-    pendingSteps = new Set(data.steps);
-    renderFlow();
-    refreshPreview();
-    startToolGeneration(data.named_steps);
-  }).catch(() => toast('Erro ao carregar o arquivo', 'err'));
+async function loadJsonFile(filename) {
+  if (_importBlocked()) return;
+  hideModal('jsonPickerModal');
+  _importBusy = true;
+  _updateImportUI();
+  toast('Carregando JSON...', 'dim');
+  let data;
+  try {
+    data = await postJson('/api/load-json', { filename });
+  } catch (e) {
+    toast(`Erro ao carregar o arquivo: ${e.message}`, 'err');
+    return;
+  } finally {
+    _importBusy = false;
+    _updateImportUI();
+  }
+  _applyImportedFlow(data);
 }
 
 // ─── Carregar fluxo existente ─────────────────────────────────────────────────
-function loadWorkflow() {
-  fetch('/api/workflows').then(r => r.json()).then(workflows => {
-    const list = document.getElementById('workflowList');
-    if (workflows.length === 0) {
-      list.innerHTML = '<p style="color:#718096; font-size:13px;">Nenhum fluxo salvo.</p>';
-    } else {
-      list.innerHTML = workflows.map(w => `
-        <div style="background:#1e2235; border:1px solid #2d3748; border-radius:8px; padding:12px; margin-bottom:8px; cursor:pointer;"
-             onclick="selectWorkflow('${w.name}', ${JSON.stringify(w.steps).replace(/"/g, '&quot;')}, '${w.name}')">
-          <div style="font-size:14px; font-weight:500;">${w.name}</div>
-          <div style="font-size:12px; color:#718096; margin-top:4px;">${w.steps.length} step(s): ${w.steps.join(' → ')}</div>
-        </div>
-      `).join('');
-    }
-    document.getElementById('loadModal').classList.remove('hidden');
-  });
+async function loadWorkflow() {
+  if (_flowLocked()) return;
+  let workflows;
+  try {
+    workflows = await apiJson('/api/workflows');
+  } catch (e) {
+    toast(`Erro ao listar fluxos: ${e.message}`, 'err');
+    return;
+  }
+  const list = $('workflowList');
+  list.innerHTML = '';
+  if (!Array.isArray(workflows) || workflows.length === 0) {
+    list.appendChild(el('p', { class: 'empty-msg', text: 'Nenhum fluxo salvo.' }));
+  } else {
+    workflows.forEach(w => {
+      const steps = Array.isArray(w.steps) ? w.steps : [];
+      list.appendChild(el('button', { type: 'button', class: 'pick-item', title: String(w.name), onclick: () => selectWorkflow(w) }, [
+        el('div', { class: 'pick-text' }, [
+          el('div', { class: 'pick-title', text: String(w.name) }),
+          el('div', { class: 'pick-sub', text: `${steps.length} step(s): ${steps.join(' → ')}`, title: steps.join(' → ') }),
+        ]),
+      ]));
+    });
+  }
+  openModal('loadModal');
 }
 
-function selectWorkflow(slug, steps, name) {
-  document.getElementById('workflowName').value = name.replace(/_/g, ' ');
-  flowSteps = steps;
+function selectWorkflow(w) {
+  if (_flowLocked()) return;
+  $('workflowName').value = String(w.name || '').replace(/_/g, ' ');
+  $('workflowName').title = $('workflowName').value;
+  _setFlow(w.steps);
   renderFlow();
   refreshPreview();
-  document.getElementById('loadModal').classList.add('hidden');
+  hideModal('loadModal');
 }
 
 // ─── Salvar workflow ──────────────────────────────────────────────────────────
 function saveWorkflow() {
-  const workflowName = document.getElementById('workflowName').value || 'workflow';
-  const saveNameInput = document.getElementById('saveWorkflowName');
-  const saveScriptInput = document.getElementById('saveScriptName');
+  const workflowName = $('workflowName').value || 'workflow';
+  const saveNameInput = $('saveWorkflowName');
+  const saveScriptInput = $('saveScriptName');
   saveNameInput.value = workflowName;
+  saveNameInput.title = workflowName;
   const slug = workflowName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   saveScriptInput.value = slug || 'workflow';
-  document.getElementById('saveFilePreview').textContent = (slug || 'workflow') + '.py';
-  document.getElementById('saveModal').classList.remove('hidden');
+  saveScriptInput.title = saveScriptInput.value;
+  $('saveFilePreview').textContent = (slug || 'workflow') + '.py';
+  openModal('saveModal');
 }
 
-function confirmSave() {
-  const workflowName = document.getElementById('saveWorkflowName').value || 'workflow';
-  const scriptName = document.getElementById('saveScriptName').value.trim() || 'workflow';
-  document.getElementById('saveModal').classList.add('hidden');
-  fetch('/api/save-workflow', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: workflowName, script_name: scriptName, steps: flowSteps }),
-  }).then(r => r.json()).then(data => {
-    toast(`Script salvo: tests/${data.file}`, 'ok');
-  });
+async function confirmSave() {
+  const workflowName = $('saveWorkflowName').value || 'workflow';
+  const scriptName = $('saveScriptName').value.trim() || 'workflow';
+  if (!flowSteps.length) { toast('Nenhum step no fluxo para salvar', 'err'); return; }
+  const btn = $('confirmSaveBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  let data;
+  try {
+    data = await postJson('/api/save-workflow', { workflow_name: workflowName, script_name: scriptName, steps: flowSteps.slice() });
+  } catch (e) {
+    toast(`Erro ao salvar o script: ${e.message}`, 'err');   // modal continua aberto para corrigir
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  hideModal('saveModal');
+  toast(typeof data.file === 'string' && data.file ? `Script salvo: tests/${data.file}` : 'Script salvo', 'ok');
 }
 
-// ─── Execução via SSE ─────────────────────────────────────────────────────────
-function toggleBreakpoint(name, e) {
-  e.stopPropagation();
+// ─── Execução ─────────────────────────────────────────────────────────────────
+function toggleBreakpoint(idx, e) {
+  if (e) e.stopPropagation();
   // Desmarca se clicar no mesmo
-  breakpointStep = breakpointStep === name ? null : name;
-  // Atualiza visual de todos os blocos
-  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
-    block.classList.toggle('has-breakpoint', block.dataset.tool === breakpointStep);
-  });
-  if (breakpointStep) toast(`Breakpoint em: ${breakpointStep}`, 'ok');
+  breakpointIdx = breakpointIdx === idx ? null : idx;
+  _applyFlowMarkers();
+  if (breakpointIdx !== null) toast(`Breakpoint antes de: ${breakpointIdx + 1}. ${flowSteps[breakpointIdx]}`, 'ok');
   else toast('Breakpoint removido', 'dim');
 }
 
-function runWorkflow() {
+// Marca visualmente o bloco como ponto de início (vale para a próxima execução)
+function toggleStartFrom(idx, e) {
+  if (e) e.stopPropagation();
+  startFromIdx = startFromIdx === idx ? null : idx;
+  _applyFlowMarkers();
+  if (startFromIdx !== null) toast(`↩ Executar a partir de: ${startFromIdx + 1}. ${flowSteps[startFromIdx]}`, 'ok');
+  else toast('Ponto de início removido', 'dim');
+}
+
+// Compatibilidade com a API antiga por nome (marca a primeira ocorrência)
+function setStartFrom(name) {
+  const idx = flowSteps.indexOf(name);
+  if (idx !== -1) { startFromIdx = idx; _applyFlowMarkers(); }
+}
+
+// Limpa o estado de retomada (chamado no início de cada execução)
+function clearStartFrom() {
+  startFromIdx = null;
+  _applyFlowMarkers();
+}
+
+function _setRunUI(running) {
+  const runBtn = $('runBtn');
+  const cancelBtn = $('cancelBtn');
+  const pauseBtn = $('pauseBtn');
+  runBtn.classList.toggle('running', running);
+  runBtn.textContent = running ? '⏳ Executando' : '▶ Executar';
+  cancelBtn.classList.toggle('visible', running);
+  cancelBtn.disabled = false;
+  pauseBtn.classList.toggle('visible', running);
+  pauseBtn.classList.remove('paused');
+  pauseBtn.disabled = false;
+  pauseBtn.textContent = '⏸ Pausar';
+  if (_flowSortable) _flowSortable.option('disabled', running);   // fluxo travado durante a execução
+}
+
+async function runWorkflow() {
+  if (_run) return;
   if (flowSteps.length === 0) { toast('Nenhum step no fluxo', 'err'); return; }
+  const names = toolNameSet();
+  const missing = [...new Set(flowSteps.filter(s => !names.has(s)))];
+  if (missing.length) {
+    toast(`Não é possível executar: tool(s) inexistente(s) no fluxo: ${missing.join(', ')}`, 'err', 6000);
+    return;
+  }
 
-  const runBtn = document.getElementById('runBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
-  if (runBtn.classList.contains('running')) return;
+  const name = $('workflowName').value || 'workflow';
+  const headless = $('headlessToggle').checked;
+  const cdpUrl = !headless ? ($('cdpUrlInput').value.trim() || null) : null;
+  // Captura antes de limpar — o ponto de início vale só para esta execução
+  const effectiveStartFrom = startFromIdx;
+  const stopBefore = breakpointIdx;
+  clearStartFrom();
 
-  const name = document.getElementById('workflowName').value || 'workflow';
+  const run = _run = {
+    id: genRunId(), ctrl: new AbortController(), steps: flowSteps.slice(), headless,
+    lastFailIdx: null, sawStepResult: false, finished: false, cancelling: false, paused: false,
+  };
 
-  const panel = document.getElementById('terminalPanel');
-  const output = document.getElementById('terminalOutput');
-  const status = document.getElementById('terminalStatus');
+  const panel = $('terminalPanel');
+  const output = $('terminalOutput');
+  const status = $('terminalStatus');
   panel.classList.add('open');
   output.innerHTML = '';
-  clearStepHighlights();
-  _lastFailedStep = null;
-  // Captura antes de limpar — clearStartFrom() zera a variável
-  const effectiveStartFrom = startFromStep;
-  clearStartFrom();
+  _clearRunMarks();
+  applyStepMarks();
   status.style.display = 'inline';
   status.className = 'terminal-status running';
   status.textContent = 'Executando...';
-  runBtn.classList.add('running');
-  runBtn.textContent = '⏳ Executando';
-  cancelBtn.classList.add('visible');
-  _isPaused = false;
-  const pauseBtn = document.getElementById('pauseBtn');
-  pauseBtn.classList.add('visible');
-  pauseBtn.classList.remove('paused');
-  pauseBtn.textContent = '⏸ Pausar';
+  _setRunUI(true);
 
-  const headless = document.getElementById('headlessToggle').checked;
-  const cdpUrl = !headless ? (document.getElementById('cdpUrlInput').value.trim() || null) : null;
-  if (effectiveStartFrom) {
-    appendLine(`↩ Retomando a partir de: ${effectiveStartFrom}`, 'dim');
+  if (effectiveStartFrom !== null) {
+    appendLine(`↩ Retomando a partir de: ${effectiveStartFrom + 1}. ${run.steps[effectiveStartFrom]}`, 'dim');
   } else {
     appendLine(`Iniciando fluxo: ${name}`, 'dim');
   }
-  appendLine(headless ? '🔇 Modo headless (sem janela)' : '🖥 Modo visual (CDP)', 'dim');
+  if (stopBefore !== null) appendLine(`⬤ Breakpoint antes de: ${stopBefore + 1}. ${run.steps[stopBefore]}`, 'dim');
+  appendLine(headless ? '🔇 Modo headless (sem janela) — resultado ao final' : '🖥 Modo visual (CDP)', 'dim');
   appendLine('─'.repeat(44), 'sep');
 
-  fetch('/api/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workflow_name: name, steps: flowSteps, stop_before: breakpointStep, start_from: effectiveStartFrom, headless, cdp_url: cdpUrl }),
-  }).then(response => {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+  let resp;
+  try {
+    resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        run_id: run.id, workflow_name: name, steps: run.steps, headless, cdp_url: cdpUrl,
+        start_from_index: effectiveStartFrom, stop_before_index: stopBefore,
+      }),
+      signal: run.ctrl.signal,
+    });
+  } catch (e) {
+    if (run.finished) return;
+    appendLine(`[ERRO] Falha de conexão com o servidor: ${e.message}`, 'fail');
+    finishRun(run, 1);
+    return;
+  }
+  if (run.finished) return;
 
-    function read() {
-      reader.read().then(({ done, value }) => {
-        if (done) { finishRun(null); return; }
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop();
-        for (const part of parts) {
-          if (!part.startsWith('data: ')) continue;
-          const line = part.slice(6);
-          if (line.startsWith('__RUN_ID__')) {
-            _currentRunId = line.slice('__RUN_ID__'.length).trim();
-            continue;
-          }
-          if (line.startsWith('__EXIT__')) {
-            finishRun(parseInt(line.replace('__EXIT__', ''), 10));
-            return;
-          }
-          renderLine(line);
-        }
-        read();
-      });
-    }
-    read();
-  }).catch(e => {
-    appendLine(`[ERRO] ${e}`, 'fail');
-    finishRun(1);
-  });
+  if (!resp.ok) {
+    const msg = await errorFromResponse(resp);
+    if (run.finished) return;
+    appendLine(`[ERRO] ${msg}`, 'fail');
+    toast(msg, 'err');
+    finishRun(run, 1);
+    return;
+  }
+
+  const ctype = resp.headers.get('Content-Type') || '';
+  if (ctype.includes('application/json')) {
+    // Modo headless: resposta JSON única {result, run_id, exit_code, cancelled, error?}
+    let data = null;
+    try { data = await resp.json(); } catch { data = null; }
+    if (run.finished) return;
+    if (!data) { appendLine('[ERRO] Resposta inválida do servidor', 'fail'); finishRun(run, 1); return; }
+    const ok = String(data.result) === 'true';
+    if (data.error) appendLine(`[ERRO] ${data.error}`, 'fail');
+    appendLine(`Resultado: ${ok ? 'true' : 'false'}` + (data.exit_code !== undefined && data.exit_code !== null ? ` (código de saída ${data.exit_code})` : ''), ok ? 'ok' : 'fail');
+    finishRun(run, data.cancelled ? 'cancelled' : (ok ? 0 : 1));
+    return;
+  }
+
+  // Modo visual: SSE linha a linha
+  let exitCode = null;
+  try {
+    await readSSE(resp, line => {
+      if (run.finished) return false;   // descarta linhas atrasadas de execução já encerrada
+      if (line.startsWith('__EXIT__')) {
+        exitCode = parseInt(line.slice('__EXIT__'.length), 10);
+        if (isNaN(exitCode)) exitCode = 1;
+        return false;
+      }
+      renderLine(run, line);
+    });
+  } catch (e) {
+    if (run.finished) return;
+    appendLine(`[ERRO] Conexão com o servidor perdida: ${e.message}`, 'fail');
+    finishRun(run, 1);
+    return;
+  }
+  if (run.finished) return;
+  if (exitCode === null) {
+    appendLine('[ERRO] A conexão foi encerrada sem o código de saída da execução', 'fail');
+    finishRun(run, 1);
+    return;
+  }
+  finishRun(run, exitCode === -15 ? 'cancelled' : exitCode);
 }
 
 // ─── Cancelar execução ────────────────────────────────────────────────────────
-function cancelRun() {
-  const body = _currentRunId ? JSON.stringify({ run_id: _currentRunId }) : '{}';
-  fetch('/api/run/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-    .then(r => r.json())
-    .then(data => {
-      appendLine('[CANCELADO] Execução interrompida pelo usuário', 'fail');
-      finishRun(1);
-    });
+async function cancelRun() {
+  const run = _run;
+  if (!run || run.cancelling) return;
+  run.cancelling = true;
+  const cancelBtn = $('cancelBtn');
+  cancelBtn.disabled = true;
+  let data;
+  try {
+    data = await postJson('/api/run/cancel', { run_id: run.id });   // run_id sempre enviado
+  } catch (e) {
+    run.cancelling = false;
+    cancelBtn.disabled = false;
+    toast(`Não foi possível cancelar: ${e.message}`, 'err');
+    return;
+  }
+  if (run.finished) return;
+  if (data.ok === false) {
+    run.cancelling = false;
+    cancelBtn.disabled = false;
+    toast(`Não foi possível cancelar: ${data.message || data.error || 'resposta do servidor'}`, 'err');
+    return;
+  }
+  appendLine('[CANCELADO] Execução interrompida pelo usuário' + (data.pending ? ' (antes de iniciar)' : ''), 'fail');
+  finishRun(run, 'cancelled');
+  run.ctrl.abort();   // linhas/__EXIT__ atrasados não caem em uma execução nova
 }
 
-let _isPaused = false;
-let _currentRunId = null;
-
-function togglePause() {
-  const btn = document.getElementById('pauseBtn');
-  const endpoint = _isPaused ? '/api/run/resume' : '/api/run/pause';
-  const body = _currentRunId ? JSON.stringify({ run_id: _currentRunId }) : '{}';
-  fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
-    .then(r => r.json())
-    .then(data => {
-      if (!data.ok) return;
-      _isPaused = data.paused;
-      if (_isPaused) {
-        btn.classList.add('paused');
-        btn.textContent = '▶ Retomar';
-        appendLine('⏸ Execução pausada', 'dim');
-      } else {
-        btn.classList.remove('paused');
-        btn.textContent = '⏸ Pausar';
-        appendLine('▶ Execução retomada', 'dim');
-      }
-    });
+async function togglePause() {
+  const run = _run;
+  if (!run) return;
+  const btn = $('pauseBtn');
+  const endpoint = run.paused ? '/api/run/resume' : '/api/run/pause';
+  btn.disabled = true;
+  let data;
+  try {
+    data = await postJson(endpoint, { run_id: run.id });
+  } catch (e) {
+    toast(`Erro ao ${run.paused ? 'retomar' : 'pausar'}: ${e.message}`, 'err');
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  if (run.finished) return;
+  if (!data.ok) { toast(data.message || data.error || 'O servidor não aplicou a pausa/retomada', 'warn'); return; }
+  run.paused = !!data.paused;
+  if (run.paused) {
+    btn.classList.add('paused');
+    btn.textContent = '▶ Retomar';
+    appendLine('⏸ Execução pausada', 'dim');
+  } else {
+    btn.classList.remove('paused');
+    btn.textContent = '⏸ Pausar';
+    appendLine('▶ Execução retomada', 'dim');
+  }
 }
 
 function updateHeadlessLabel() {
-  const checked = document.getElementById('headlessToggle').checked;
-  document.getElementById('headlessLabel').textContent = checked ? 'Headless' : 'Com browser';
-  document.getElementById('cdpUrlWrapper').style.display = checked ? 'none' : 'flex';
+  const checked = $('headlessToggle').checked;
+  $('headlessLabel').textContent = checked ? 'Headless' : 'Com browser';
+  $('cdpUrlWrapper').style.display = checked ? 'none' : 'flex';
 }
 
 function toggleTestMode() {
   const isActive = document.body.classList.toggle('test-mode');
-  const btn = document.getElementById('testModeBtn');
+  const btn = $('testModeBtn');
   btn.classList.toggle('active', isActive);
-  btn.textContent = isActive ? '✕ Sair do Modo Teste' : '⬡ Modo Teste';
-
+  btn.replaceChildren(isActive ? '✕' : '⬡', el('span', { class: 'lbl-opt', text: isActive ? ' Sair do Modo Teste' : ' Modo Teste' }));
+  btn.title = isActive ? 'Sair do Modo Teste' : 'Modo Teste (tela compacta)';
   // No modo teste abre o terminal automaticamente
-  const panel = document.getElementById('terminalPanel');
-  if (isActive) {
-    panel.classList.add('open');
-  }
+  if (isActive) $('terminalPanel').classList.add('open');
+  if (previewCM) setTimeout(() => previewCM.refresh(), 50);
 }
 
-function renderLine(line) {
+// Índice da primeira ocorrência do nome depois do último step marcado (compatibilidade
+// com __RUNNING__<name> sem índice)
+function _guessIdxByName(run, name) {
+  const after = _stepMarks.running !== null ? _stepMarks.running : -1;
+  for (let i = after + 1; i < run.steps.length; i++) if (run.steps[i] === name) return i;
+  return run.steps.indexOf(name);
+}
+
+function renderLine(run, line) {
   if (line.startsWith('__SCREENSHOT__')) {
     const rest = line.slice('__SCREENSHOT__'.length);
     const colonIdx = rest.indexOf(':');
-    if (colonIdx !== -1) {
-      const toolName = rest.slice(0, colonIdx);
-      const b64 = rest.slice(colonIdx + 1);
-      appendScreenshot(toolName, b64);
-    }
+    if (colonIdx !== -1) appendScreenshot(rest.slice(0, colonIdx), rest.slice(colonIdx + 1));
     return;
   }
+  if (line.startsWith('__RUN_ID__')) return;   // é o mesmo id que o frontend enviou
   if (line.startsWith('__RUNNING__')) {
-    const toolName = line.slice('__RUNNING__'.length).trim();
-    highlightRunningStep(toolName);
+    // __RUNNING__<idx>:<name> — idx absoluto em flowSteps
+    const rest = line.slice('__RUNNING__'.length).trim();
+    const m = /^(\d+):(.*)$/.exec(rest);
+    const idx = m ? parseInt(m[1], 10) : _guessIdxByName(run, rest);
+    highlightRunningStep(idx);
     return; // não exibe no terminal
+  }
+  if (line.startsWith('__STEP_RESULT__')) {
+    // __STEP_RESULT__<idx>:<ok|fail>:<name>
+    const m = /^(\d+):(ok|fail):(.*)$/.exec(line.slice('__STEP_RESULT__'.length).trim());
+    if (m) {
+      const idx = parseInt(m[1], 10);
+      run.sawStepResult = true;
+      markStepResult(idx, m[2] === 'ok');
+      if (m[2] === 'fail') run.lastFailIdx = idx;
+    }
+    return;
   }
   if (line.startsWith('__START_FROM__')) {
     const toolName = line.slice('__START_FROM__'.length).trim();
@@ -1260,79 +1981,82 @@ function renderLine(line) {
     appendLine('─'.repeat(44), 'sep');
     return;
   }
-  if (line.startsWith('[OK]')) {
-    // [OK] nome_da_tool — step passou
-    const m = line.match(/\[OK\]\s+(\S+)/);
-    appendLine(line, 'ok');
-  }
-  else if (line.startsWith('[FAIL]')) {
-    // [FAIL] nome_da_tool: N erro(s) — step falhou, guarda para retomada
-    const m = line.match(/\[FAIL\]\s+(\S+)/);
-    if (m) _lastFailedStep = m[1];
-    appendLine(line, 'fail');
-  }
+  if (line.startsWith('[OK]')) appendLine(line, 'ok');          // impresso pela própria tool
+  else if (line.startsWith('[FAIL]')) appendLine(line, 'fail'); // idem: "[FAIL] nome: N erro(s)"
+  else if (line.startsWith('[ERRO]')) appendLine(line, 'fail');
   else if (line.startsWith('  - ')) appendLine(line, 'fail');
   else if (line.startsWith('=') || line.startsWith('-')) appendLine(line, 'sep');
   else if (line.startsWith('  [PASS]')) {
-    const match = line.match(/\[PASS\]\s+(\S+)/);
-    if (match) markStepResult(match[1], true);
+    if (!run.sawStepResult && _stepMarks.running !== null) markStepResult(_stepMarks.running, true);
     appendLine(line, 'ok');
   }
   else if (line.startsWith('  [FAIL]')) {
-    const match = line.match(/\[FAIL\]\s+(\S+)/);
-    if (match) markStepResult(match[1], false);
-    appendLine(line, 'fail', match ? match[1] : null);
+    // "  [FAIL] <name>: <erro>" — clicável para abrir o editor da tool
+    const match = line.match(/\[FAIL\]\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (!run.sawStepResult && _stepMarks.running !== null) {
+      run.lastFailIdx = _stepMarks.running;
+      markStepResult(_stepMarks.running, false);
+    }
+    const link = match && toolNameSet().has(match[1]) ? match[1] : null;
+    appendLine(line, 'fail', link);
   }
+  else if (line.trim() === 'true') appendLine(line, 'ok');
+  else if (line.trim() === 'false') appendLine(line, 'fail');
   else appendLine(line, '');
 }
 
-function highlightRunningStep(toolName) {
-  // Remove running-now de todos e marca o atual
-  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
-    block.classList.remove('running-now');
-    // Limpa indicador de pulso anterior
-    const ind = block.querySelector('.run-indicator');
-    if (ind) ind.remove();
-  });
-
-  const block = document.querySelector(`#dropZone .flow-block[data-tool="${toolName}"]`);
-  if (!block) return;
-  block.classList.add('running-now');
-  block.classList.remove('run-ok', 'run-fail');
-
-  // Insere ícone pulsante
-  const ind = document.createElement('span');
-  ind.className = 'run-indicator';
-  ind.textContent = '⚡';
-  ind.title = 'Executando agora';
-  block.querySelector('.block-actions').prepend(ind);
-
-  // Scroll suave até o bloco no canvas
-  block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function _blockAt(idx) {
+  if (!Number.isInteger(idx) || idx < 0) return null;
+  return document.querySelector(`#dropZone .flow-block[data-idx="${idx}"]`);
 }
 
-function markStepResult(toolName, passed) {
-  const block = document.querySelector(`#dropZone .flow-block[data-tool="${toolName}"]`);
-  if (!block) return;
-  block.classList.remove('running-now', 'run-ok', 'run-fail');
-  block.classList.add(passed ? 'run-ok' : 'run-fail');
-  const ind = block.querySelector('.run-indicator');
-  if (ind) { ind.textContent = passed ? '✓' : '✗'; ind.style.animation = 'none'; }
+function highlightRunningStep(idx) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= flowSteps.length) return;
+  _stepMarks.running = idx;
+  delete _stepMarks.results[idx];
+  applyStepMarks();
+  const block = _blockAt(idx);
+  // Scroll suave até o bloco no canvas
+  if (block) block.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function markStepResult(idx, passed) {
+  if (!Number.isInteger(idx) || idx < 0 || idx >= flowSteps.length) return;
+  _stepMarks.results[idx] = !!passed;
+  if (_stepMarks.running === idx) _stepMarks.running = null;
+  applyStepMarks();
+}
+
+// Aplica os destaques de execução (por índice) aos blocos renderizados
+function applyStepMarks() {
+  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
+    const idx = parseInt(block.dataset.idx, 10);
+    const running = _stepMarks.running === idx;
+    const result = _stepMarks.results[idx];
+    block.classList.toggle('running-now', running);
+    block.classList.toggle('run-ok', !running && result === true);
+    block.classList.toggle('run-fail', !running && result === false);
+    const old = block.querySelector('.run-indicator');
+    if (old) old.remove();
+    if (running || result !== undefined) {
+      const ind = el('span', {
+        class: 'run-indicator' + (running ? '' : ' done'),
+        text: running ? '⚡' : (result ? '✓' : '✗'),
+        title: running ? 'Executando agora' : (result ? 'Passou' : 'Falhou'),
+      });
+      block.querySelector('.block-actions').prepend(ind);
+    }
+  });
 }
 
 function clearStepHighlights() {
-  document.querySelectorAll('#dropZone .flow-block').forEach(block => {
-    block.classList.remove('running-now', 'run-ok', 'run-fail');
-    const ind = block.querySelector('.run-indicator');
-    if (ind) ind.remove();
-  });
+  _clearRunMarks();
+  applyStepMarks();
 }
 
 function appendLine(text, cls = '', toolLink = null) {
-  const output = document.getElementById('terminalOutput');
-  const div = document.createElement('div');
-  div.className = `line ${cls}`;
-  div.textContent = text;
+  const output = $('terminalOutput');
+  const div = el('div', { class: `line ${cls}${toolLink ? ' clickable' : ''}`, text });
   if (toolLink) {
     div.title = `Clique para editar a tool ${toolLink}`;
     div.addEventListener('click', () => openEditor(toolLink, null));
@@ -1342,98 +2066,76 @@ function appendLine(text, cls = '', toolLink = null) {
 }
 
 function appendScreenshot(toolName, b64) {
-  const output = document.getElementById('terminalOutput');
-  const wrapper = document.createElement('div');
-  wrapper.className = 'line screenshot-line';
-  const label = document.createElement('span');
-  label.className = 'dim';
-  label.textContent = `📸 ${toolName}`;
-  label.style.cssText = 'display:block; font-size:11px; color:#718096; margin-bottom:4px;';
-  const img = document.createElement('img');
-  img.src = `data:image/jpeg;base64,${b64}`;
-  img.style.cssText = 'max-width:100%; border-radius:4px; border:1px solid #2d3748; cursor:pointer;';
-  img.title = 'Clique para ampliar';
-  img.addEventListener('click', () => window.open(img.src, '_blank'));
-  wrapper.appendChild(label);
-  wrapper.appendChild(img);
-  output.appendChild(wrapper);
+  const output = $('terminalOutput');
+  // Só aceita base64 puro (evita injetar outra coisa no src)
+  if (!/^[A-Za-z0-9+/=\s]+$/.test(b64)) return;
+  const label = el('span', { class: 'dim', text: `📸 ${toolName}`, style: 'display:block; font-size:11px; color:#718096; margin-bottom:4px;' });
+  const img = el('img', { src: `data:image/jpeg;base64,${b64.trim()}`, alt: `Screenshot de ${toolName}`, title: 'Clique para ampliar', style: 'max-width:100%; border-radius:4px; border:1px solid #2d3748; cursor:pointer;' });
+  img.addEventListener('click', () => {
+    const w = window.open();
+    if (w) { w.document.title = `Screenshot ${toolName}`; w.document.body.style.margin = '0'; w.document.body.appendChild(el('img', { src: img.src, style: 'max-width:100%;' })); }
+  });
+  output.appendChild(el('div', { class: 'line screenshot-line' }, [label, img]));
   output.scrollTop = output.scrollHeight;
 }
 
-function finishRun(code) {
-  _currentRunId = null;
-  const runBtn = document.getElementById('runBtn');
-  const cancelBtn = document.getElementById('cancelBtn');
-  const status = document.getElementById('terminalStatus');
-  runBtn.classList.remove('running');
-  runBtn.innerHTML = '&#9654; Executar';
-  cancelBtn.classList.remove('visible');
-  const pauseBtnF = document.getElementById('pauseBtn');
-  pauseBtnF.classList.remove('visible', 'paused');
-  pauseBtnF.textContent = '⏸ Pausar';
-  // Remove o ícone pulsante de qualquer bloco ainda com running-now
-  document.querySelectorAll('#dropZone .flow-block.running-now').forEach(b => {
-    b.classList.remove('running-now');
-    const ind = b.querySelector('.run-indicator');
-    if (ind) ind.remove();
-  });
+// Finaliza a execução (idempotente). code: 0 = passou, 'cancelled' = cancelado, outro = falhou
+function finishRun(run, code) {
+  if (!run || run.finished) return;
+  run.finished = true;
+  if (_run === run) _run = null;
+  _setRunUI(false);
+  _stepMarks.running = null;   // remove o ícone pulsante
+  applyStepMarks();
 
-  if (code === null) return;
-  if (code === 0) {
+  const status = $('terminalStatus');
+  status.style.display = 'inline';
+  if (code === 'cancelled') {
+    status.className = 'terminal-status cancel';
+    status.textContent = 'CANCELADO';
+  } else if (code === 0) {
     status.className = 'terminal-status ok';
     status.textContent = 'PASSOU';
   } else {
     status.className = 'terminal-status fail';
     status.textContent = 'FALHOU';
-    // Mostra botão de retomada se houver um step identificado como falho
-    if (_lastFailedStep) {
+    // Mostra botão de retomada a partir do índice do último __STEP_RESULT__ com falha
+    const idx = run.lastFailIdx;
+    if (idx !== null && idx < run.steps.length) {
+      const stepName = run.steps[idx];
       appendLine('─'.repeat(44), 'sep');
-      const output = document.getElementById('terminalOutput');
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-resume-from';
-      btn.textContent = `↩ Retomar a partir de: ${_lastFailedStep}`;
-      btn.onclick = () => resumeFrom(_lastFailedStep);
-      output.appendChild(btn);
+      const output = $('terminalOutput');
+      output.appendChild(el('button', {
+        type: 'button', class: 'btn btn-resume-from', text: `↩ Retomar a partir de: ${idx + 1}. ${stepName}`,
+        onclick: () => resumeFrom(idx, stepName),
+      }));
       output.scrollTop = output.scrollHeight;
     }
   }
 }
 
-// Define o step de retomada e dispara execução
-function resumeFrom(stepName) {
-  startFromStep = stepName;
+// Define o step de retomada (por índice) e dispara execução
+function resumeFrom(idx, stepName) {
+  if (flowSteps[idx] !== stepName) {
+    toast('O fluxo mudou desde a execução — marque o ponto de início manualmente (↩)', 'warn', 5000);
+    return;
+  }
+  startFromIdx = idx;
   runWorkflow();
 }
 
-// Marca visualmente o bloco como ponto de início e limpa os outros
-function setStartFrom(name) {
-  startFromStep = name;
-  document.querySelectorAll('#dropZone .flow-block').forEach(b => {
-    b.classList.toggle('has-start-from', b.dataset.tool === name);
-  });
-  toast(`↩ Executar a partir de: ${name}`, 'ok');
-}
-
-// Limpa o estado de retomada (chamado no início de cada execução)
-function clearStartFrom() {
-  startFromStep = null;
-  document.querySelectorAll('#dropZone .flow-block').forEach(b => {
-    b.classList.remove('has-start-from');
-  });
-}
-
 function clearTerminal() {
-  document.getElementById('terminalOutput').innerHTML = '';
-  const status = document.getElementById('terminalStatus');
-  status.style.display = 'none';
+  $('terminalOutput').innerHTML = '';
+  $('terminalStatus').style.display = 'none';
 }
 
 function closeTerminal() {
-  document.getElementById('terminalPanel').classList.remove('open');
+  $('terminalPanel').classList.remove('open');
 }
 
 // ─── Nova tool do zero ────────────────────────────────────────────────────────
 let newToolCM = null;
+let _newToolName = 'minha_tool';  // nome atualmente aplicado no código do editor
 
 const NEW_TOOL_TEMPLATE = `from playwright.async_api import Page
 
@@ -1454,14 +2156,22 @@ async def TOOL_NAME(page: Page) -> bool:
     return True
 `;
 
-function openNewToolModal() {
-  document.getElementById('newToolName').value = '';
-  document.getElementById('newToolModal').classList.remove('hidden');
+function _sanitizeToolName(raw) {
+  let n = String(raw).trim().replace(/[^a-zA-Z0-9_]/g, '_');
+  if (/^[0-9]/.test(n)) n = '_' + n;
+  return n || 'minha_tool';
+}
 
-  const container = document.getElementById('newToolEditorContainer');
+function openNewToolModal() {
+  $('newToolName').value = '';
+  $('newToolName').title = '';
+  openModal('newToolModal');
+  _newToolName = 'minha_tool';
+
+  const container = $('newToolEditorContainer');
   container.innerHTML = '';
   newToolCM = CodeMirror(container, {
-    value: NEW_TOOL_TEMPLATE.replace(/TOOL_NAME/g, 'minha_tool'),
+    value: NEW_TOOL_TEMPLATE.replace(/TOOL_NAME/g, _newToolName),
     mode: 'python',
     theme: 'dracula',
     lineNumbers: true,
@@ -1471,44 +2181,57 @@ function openNewToolModal() {
     lineWrapping: false,
     extraKeys: { Tab: cm => cm.replaceSelection('    ') },
   });
-  setTimeout(() => newToolCM.refresh(), 50);
+  setTimeout(() => { if (newToolCM) newToolCM.refresh(); $('newToolName').focus(); }, 50);
+}
 
-  // Atualiza o template quando o nome muda
-  document.getElementById('newToolName').oninput = function() {
-    const name = this.value.trim().replace(/[^a-zA-Z0-9_]/g, '_') || 'minha_tool';
-    const current = newToolCM.getValue();
-    // Substitui somente se o código ainda parece ser o template
-    if (current.includes('async def ')) {
-      const updated = current.replace(/async def \w+\(/, `async def ${name}(`);
-      const withPrints = updated
-        .replace(/\[FAIL\] \w+"/g, `[FAIL] ${name}"`)
-        .replace(/\[OK\] \w+"/g, `[OK] ${name}"`);
-      newToolCM.setValue(withPrints);
+// Atualiza o nome no código (com debounce) trocando só as ocorrências do nome anterior:
+// não usa setValue, então o cursor e o histórico de desfazer do editor são preservados.
+function syncNewToolName() {
+  if (!newToolCM) return;
+  const name = _sanitizeToolName($('newToolName').value);
+  const old = _newToolName;
+  if (name === old) return;
+  const doc = newToolCM.getDoc();
+  const re = new RegExp(`\\b${escapeRegex(old)}\\b`, 'g');
+  newToolCM.operation(() => {
+    for (let ln = 0; ln < doc.lineCount(); ln++) {
+      const matches = [...doc.getLine(ln).matchAll(re)];
+      for (let k = matches.length - 1; k >= 0; k--) {
+        const ch = matches[k].index;
+        doc.replaceRange(name, { line: ln, ch }, { line: ln, ch: ch + old.length }, '+toolname');
+      }
     }
-  };
-}
-
-function closeNewToolModal() {
-  document.getElementById('newToolModal').classList.add('hidden');
-  newToolCM = null;
-  document.getElementById('newToolName').oninput = null;
-}
-
-function confirmNewTool() {
-  const rawName = document.getElementById('newToolName').value.trim();
-  if (!rawName) { toast('Informe um nome para a tool', 'err'); return; }
-  const code = newToolCM ? newToolCM.getValue() : '';
-
-  fetch('/api/tool/new', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: rawName, code }),
-  }).then(r => r.json()).then(data => {
-    if (data.error) { toast(data.error, 'err'); return; }
-    closeNewToolModal();
-    loadTools();
-    toast(`Tool "${data.name}" criada com sucesso!`, 'ok');
   });
+  _newToolName = name;
+}
+
+function closeNewToolModal(force = false) {
+  if (!force && newToolCM && newToolCM.getValue() !== NEW_TOOL_TEMPLATE.replace(/TOOL_NAME/g, _newToolName)
+      && !confirm('Descartar o código da nova tool?')) return;
+  hideModal('newToolModal');
+  newToolCM = null;
+}
+
+async function confirmNewTool() {
+  const rawName = $('newToolName').value.trim();
+  if (!rawName) { toast('Informe um nome para a tool', 'err'); return; }
+  syncNewToolName();
+  const code = newToolCM ? newToolCM.getValue() : '';
+  const btn = $('confirmNewToolBtn');
+  btn.disabled = true;
+  let data;
+  try {
+    data = await postJson('/api/tool/new', { name: rawName, code });
+  } catch (e) {
+    toast(`Erro ao criar a tool: ${e.message}`, 'err');
+    return;
+  } finally {
+    btn.disabled = false;
+  }
+  closeNewToolModal(true);
+  loadTools();
+  const finalName = data.name || rawName;
+  toast(finalName !== rawName ? `Tool criada como "${finalName}" (nome ajustado)` : `Tool "${finalName}" criada com sucesso!`, 'ok');
 }
 
 // ─── QA: Gerador de Testes ────────────────────────────────────────────────────
@@ -1516,9 +2239,12 @@ let _qaCM = null;
 let _qaCurrentFilename = '';
 
 function openQAPanel() {
-  document.getElementById('qaPanel').classList.add('open');
+  const panel = $('qaPanel');
+  panel.classList.add('open');
+  panel.inert = false;
+  panel.removeAttribute('aria-hidden');
   if (!_qaCM) {
-    _qaCM = CodeMirror(document.getElementById('qaCodeArea'), {
+    _qaCM = CodeMirror($('qaCodeArea'), {
       mode: 'text/x-java',
       theme: 'dracula',
       lineNumbers: true,
@@ -1527,23 +2253,30 @@ function openQAPanel() {
     });
   }
   switchQATab('generate');
+  setTimeout(() => _qaCM && _qaCM.refresh(), 300);
 }
 
 function closeQAPanel() {
-  document.getElementById('qaPanel').classList.remove('open');
+  const panel = $('qaPanel');
+  panel.classList.remove('open');
+  panel.inert = true;   // fechado: fora da ordem de foco (Tab)
+  panel.setAttribute('aria-hidden', 'true');
 }
 
 function switchQATab(tab) {
   document.querySelectorAll('.qa-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.qa-tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('qaTab_' + tab).classList.add('active');
+  $('qaTab_' + tab).classList.add('active');
   document.querySelector(`.qa-tab-btn[data-tab="${tab}"]`).classList.add('active');
   if (tab === 'history') loadQAHistory();
 }
 
-function setQAStatus(html) {
-  document.getElementById('qaStatusBar').innerHTML = html;
+// Aceita texto e/ou nós DOM — nunca HTML cru vindo do servidor
+function setQAStatus(...parts) {
+  $('qaStatusBar').replaceChildren(...parts.map(p => (typeof p === 'string' ? document.createTextNode(p) : p)));
 }
+
+function _qaLangClass(lang) { return String(lang ?? '').toLowerCase().replace(/[^a-z]/g, ''); }
 
 function setQAMode(lang) {
   if (!_qaCM) return;
@@ -1557,20 +2290,20 @@ function setQAMode(lang) {
 }
 
 async function generateTests() {
-  const repoUrl = document.getElementById('qaRepoUrl').value.trim();
-  const funcName = document.getElementById('qaFuncName').value.trim();
-  const filePath = document.getElementById('qaFilePath').value.trim();
-  const exampleParams = document.getElementById('qaExampleParams').value.trim();
+  const repoUrl = $('qaRepoUrl').value.trim();
+  const funcName = $('qaFuncName').value.trim();
+  const filePath = $('qaFilePath').value.trim();
+  const exampleParams = $('qaExampleParams').value.trim();
   if (!repoUrl || !funcName) {
     toast('Informe a URL do repositório e o nome da função', 'err');
     return;
   }
 
-  const btn = document.getElementById('qaGenerateBtn');
+  const btn = $('qaGenerateBtn');
   btn.disabled = true;
   btn.textContent = 'Gerando...';
   _qaCM && _qaCM.setValue('');
-  document.getElementById('qaCodeActions').style.display = 'none';
+  $('qaCodeActions').style.display = 'none';
   setQAStatus('Iniciando...');
 
   function resetBtn() {
@@ -1578,77 +2311,85 @@ async function generateTests() {
     btn.textContent = '⚡ Gerar Testes';
   }
 
+  let resp;
   try {
-    const resp = await fetch('/api/qa/generate-tests', {
+    resp = await fetch('/api/qa/generate-tests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repo_url: repoUrl, function_name: funcName, file_path: filePath, example_params: exampleParams }),
     });
-
-    if (!resp.ok || !resp.body) {
-      setQAStatus('❌ Erro na requisição ao servidor.');
-      resetBtn();
-      return;
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-
-      // SSE: cada evento é "data: ...\n\n"
-      const parts = buf.split('\n\n');
-      buf = parts.pop(); // guarda fragmento incompleto
-
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trim();
-
-        if (raw === '__QA_FETCHING__') {
-          setQAStatus('🔄 Clonando/atualizando repositório...');
-
-        } else if (raw.startsWith('__QA_FOUND__')) {
-          const info = JSON.parse(raw.slice('__QA_FOUND__'.length));
-          const badge = `<span class="qa-badge ${info.language}">${info.language} · ${info.framework}</span>`;
-          setQAStatus(`✅ Função encontrada em <code>${info.file_path}</code>${badge}`);
-          setQAMode(info.language);
-
-        } else if (raw === '__QA_GENERATING__') {
-          setQAStatus('⚙️ Gerando testes com GPT-4o...');
-
-        } else if (raw.startsWith('__QA_DONE__')) {
-          const result = JSON.parse(raw.slice('__QA_DONE__'.length));
-          _qaCM && _qaCM.setValue(result.test_code);
-          _qaCurrentFilename = result.filename;
-          document.getElementById('qaFilename').textContent = result.filename;
-          document.getElementById('qaCodeActions').style.display = 'flex';
-          setQAStatus(`✅ Testes gerados — <strong>${result.filename}</strong> · ${result.framework}`);
-          resetBtn();
-
-        } else if (raw.startsWith('__QA_ERROR__')) {
-          const msg = raw.slice('__QA_ERROR__'.length);
-          setQAStatus(`❌ Erro: ${msg}`);
-          toast('Erro ao gerar testes: ' + msg, 'err');
-          resetBtn();
-        }
-      }
-    }
   } catch (err) {
     setQAStatus('❌ Falha de conexão com o servidor.');
     toast('Erro: ' + err.message, 'err');
+    resetBtn();
+    return;
   }
+  if (!resp.ok || !resp.body) {
+    const msg = await errorFromResponse(resp);
+    setQAStatus(`❌ Erro do servidor: ${msg}`);
+    toast('Erro ao gerar testes: ' + msg, 'err');
+    resetBtn();
+    return;
+  }
+
+  let finished = false;
+  try {
+    await readSSE(resp, line => {
+      const raw = line.trim();
+      if (raw === '__QA_FETCHING__') {
+        setQAStatus('🔄 Clonando/atualizando repositório...');
+
+      } else if (raw.startsWith('__QA_FOUND__')) {
+        const info = parseJsonSafe(raw.slice('__QA_FOUND__'.length));
+        if (!info) { setQAStatus('⚠ Resposta inválida do servidor (função encontrada, mas dados ilegíveis).'); return; }
+        const lang = _qaLangClass(info.language);
+        const badge = el('span', { class: `qa-badge ${lang}`, text: `${info.language ?? '?'} · ${info.framework ?? '?'}` });
+        setQAStatus('✅ Função encontrada em ', el('code', { text: String(info.file_path ?? '') }), badge);
+        setQAMode(lang);
+
+      } else if (raw === '__QA_GENERATING__') {
+        setQAStatus('⚙️ Gerando testes com GPT-4o...');
+
+      } else if (raw.startsWith('__QA_DONE__')) {
+        finished = true;
+        const result = parseJsonSafe(raw.slice('__QA_DONE__'.length));
+        if (!result) {
+          setQAStatus('❌ Resposta inválida do servidor ao concluir a geração.');
+          toast('Resposta inválida do servidor', 'err');
+          return false;
+        }
+        _qaCM && _qaCM.setValue(String(result.test_code ?? ''));
+        _qaCurrentFilename = String(result.filename ?? 'testes.txt');
+        $('qaFilename').textContent = _qaCurrentFilename;
+        $('qaFilename').title = _qaCurrentFilename;
+        $('qaCodeActions').style.display = 'flex';
+        setQAStatus('✅ Testes gerados — ', el('strong', { text: _qaCurrentFilename }), ` · ${result.framework ?? ''}`);
+        return false;
+
+      } else if (raw.startsWith('__QA_ERROR__')) {
+        finished = true;
+        const msg = raw.slice('__QA_ERROR__'.length);
+        setQAStatus(`❌ Erro: ${msg}`);
+        toast('Erro ao gerar testes: ' + msg, 'err');
+        return false;
+      }
+    });
+  } catch (err) {
+    setQAStatus('❌ Conexão com o servidor perdida durante a geração.');
+    toast('Erro: ' + err.message, 'err');
+    resetBtn();
+    return;
+  }
+  if (!finished) setQAStatus('❌ O servidor encerrou a conexão antes de concluir a geração.');
   resetBtn();
 }
 
 function copyQACode() {
   const code = _qaCM ? _qaCM.getValue() : '';
   if (!code) { toast('Nenhum código gerado ainda', 'err'); return; }
-  navigator.clipboard.writeText(code).then(() => toast(`Código copiado! (${_qaCurrentFilename})`, 'ok'));
+  navigator.clipboard.writeText(code)
+    .then(() => toast(`Código copiado! (${_qaCurrentFilename})`, 'ok'))
+    .catch(() => toast('Não foi possível copiar (permissão do navegador)', 'err'));
 }
 
 function downloadQACode() {
@@ -1662,50 +2403,66 @@ function downloadQACode() {
   URL.revokeObjectURL(a.href);
 }
 
+function _qaMsgRow(text, color) {
+  return el('tr', {}, [el('td', { colspan: '5', class: 'msg', style: `color:${color}; padding:12px 8px;`, text })]);
+}
+
 async function loadQAHistory() {
-  const tbody = document.getElementById('qaHistoryBody');
-  tbody.innerHTML = '<tr><td colspan="5" style="color:#4a5568;padding:12px 8px;">Carregando...</td></tr>';
+  const tbody = $('qaHistoryBody');
+  tbody.replaceChildren(_qaMsgRow('Carregando...', '#4a5568'));
+  let rows;
   try {
-    const res = await fetch('/api/qa/history');
-    const rows = await res.json();
-    if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:#4a5568;padding:12px 8px;">Nenhum teste gerado ainda.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = rows.map(r => {
-      const date = new Date(r.created_at).toLocaleString('pt-BR');
-      const repoShort = r.repo_url.split('/').slice(-2).join('/');
-      return `<tr>
-        <td title="${r.repo_url}">${repoShort}</td>
-        <td>${r.function_name}</td>
-        <td><span class="qa-badge ${r.language}" style="font-size:10px">${r.language}</span></td>
-        <td>${r.framework}</td>
-        <td style="color:#4a5568">${date}</td>
-      </tr>`;
-    }).join('');
-  } catch {
-    tbody.innerHTML = '<tr><td colspan="5" style="color:#fc8181;">Erro ao carregar histórico.</td></tr>';
+    rows = await apiJson('/api/qa/history');
+  } catch (e) {
+    tbody.replaceChildren(_qaMsgRow(`Erro ao carregar histórico: ${e.message}`, '#fc8181'));
+    return;
   }
+  if (!Array.isArray(rows) || !rows.length) {
+    tbody.replaceChildren(_qaMsgRow('Nenhum teste gerado ainda.', '#4a5568'));
+    return;
+  }
+  tbody.replaceChildren(...rows.map(r => {
+    const repo = String(r.repo_url ?? '');
+    const repoShort = repo.split('/').filter(Boolean).slice(-2).join('/') || '—';
+    const d = r.created_at ? new Date(r.created_at) : null;
+    const date = d && !isNaN(d) ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+    const dateFull = d && !isNaN(d) ? d.toLocaleString('pt-BR') : '';
+    const fn = String(r.function_name ?? '—');
+    const lang = String(r.language ?? '—');
+    const fw = String(r.framework ?? '—');
+    return el('tr', {}, [
+      el('td', { title: repo, text: repoShort }),
+      el('td', { title: fn, text: fn }),
+      el('td', { title: lang }, [el('span', { class: `qa-badge ${_qaLangClass(lang)}`, style: 'font-size:10px', text: lang })]),
+      el('td', { title: fw, text: fw }),
+      el('td', { title: dateFull || date, style: 'color:#4a5568', text: date }),
+    ]);
+  }));
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
-function toast(msg, type = 'ok') {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = `show ${type}`;
-  setTimeout(() => el.className = '', 3000);
+let _toastTimer = null;
+
+// type: ok | err | warn | dim. Cada toast cancela o timeout do anterior.
+function toast(msg, type = 'ok', ms) {
+  const box = $('toast');
+  box.textContent = msg;
+  box.className = `show ${type}`;
+  clearTimeout(_toastTimer);
+  const dur = ms ?? (type === 'err' ? 5000 : 3000);
+  _toastTimer = setTimeout(() => { box.className = ''; }, dur);
 }
 </script>
 
-<!-- QA PANEL: Gerador de Testes -->
-<div class="qa-panel" id="qaPanel">
+<!-- QA PANEL: Gerador de Testes (fechado = inert/visibility:hidden, fora da ordem de foco) -->
+<div class="qa-panel" id="qaPanel" inert aria-hidden="true">
   <div class="qa-panel-header">
     <h2>🧪 Gerador de Testes</h2>
     <div class="qa-tabs">
       <button class="qa-tab-btn active" data-tab="generate" onclick="switchQATab('generate')">Gerar</button>
       <button class="qa-tab-btn" data-tab="history" onclick="switchQATab('history')">Histórico</button>
     </div>
-    <button class="btn btn-outline btn-sm" onclick="closeQAPanel()" style="padding:4px 8px;">✕</button>
+    <button class="btn btn-outline btn-sm" onclick="closeQAPanel()" style="padding:4px 8px;" title="Fechar (Esc)" aria-label="Fechar">✕</button>
   </div>
 
   <div class="qa-panel-body">
@@ -1713,20 +2470,20 @@ function toast(msg, type = 'ok') {
     <!-- TAB: Gerar -->
     <div class="qa-tab active" id="qaTab_generate">
       <div class="qa-field">
-        <label>URL do Repositório</label>
-        <input type="text" id="qaRepoUrl" placeholder="https://github.com/org/repo" />
+        <label for="qaRepoUrl">URL do Repositório</label>
+        <input type="text" id="qaRepoUrl" placeholder="https://github.com/org/repo" oninput="this.title=this.value" />
       </div>
       <div class="qa-field">
-        <label>Nome da Função / Método</label>
-        <input type="text" id="qaFuncName" placeholder="ex: calcularDesconto" />
+        <label for="qaFuncName">Nome da Função / Método</label>
+        <input type="text" id="qaFuncName" placeholder="ex: calcularDesconto" oninput="this.title=this.value" />
       </div>
       <div class="qa-field">
-        <label>Arquivo (opcional)</label>
-        <input type="text" id="qaFilePath" placeholder="ex: src/services/DescontoService.java" />
+        <label for="qaFilePath">Arquivo (opcional)</label>
+        <input type="text" id="qaFilePath" placeholder="ex: src/services/DescontoService.java" oninput="this.title=this.value" />
       </div>
       <div class="qa-field">
-        <label>Parâmetros de Exemplo (opcional)</label>
-        <input type="text" id="qaExampleParams" placeholder='ex: calcularDesconto(100.0, "CLIENTE_VIP")' />
+        <label for="qaExampleParams">Parâmetros de Exemplo (opcional)</label>
+        <input type="text" id="qaExampleParams" placeholder='ex: calcularDesconto(100.0, "CLIENTE_VIP")' oninput="this.title=this.value" />
       </div>
       <button class="btn btn-primary" id="qaGenerateBtn" onclick="generateTests()" style="align-self:flex-start;">
         ⚡ Gerar Testes
@@ -1747,20 +2504,25 @@ function toast(msg, type = 'ok') {
 
     <!-- TAB: Histórico -->
     <div class="qa-tab" id="qaTab_history">
-      <table class="qa-history-table">
-        <thead>
-          <tr>
-            <th>Repositório</th>
-            <th>Função</th>
-            <th>Linguagem</th>
-            <th>Framework</th>
-            <th>Data</th>
-          </tr>
-        </thead>
-        <tbody id="qaHistoryBody">
-          <tr><td colspan="5" style="color:#4a5568;padding:12px 8px;">Carregue o histórico...</td></tr>
-        </tbody>
-      </table>
+      <div class="qa-history-wrap">
+        <table class="qa-history-table">
+          <colgroup>
+            <col style="width:23%"><col style="width:20%"><col style="width:18%"><col style="width:15%"><col style="width:24%">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Repositório</th>
+              <th>Função</th>
+              <th>Linguagem</th>
+              <th>Framework</th>
+              <th>Data</th>
+            </tr>
+          </thead>
+          <tbody id="qaHistoryBody">
+            <tr><td colspan="5" class="msg" style="color:#4a5568;padding:12px 8px;">Carregue o histórico...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
   </div>

@@ -32,6 +32,14 @@ def _slug(text: str) -> str:
     return text.strip("_")
 
 
+_TOOL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def is_valid_tool_name(name) -> bool:
+    """Nome de tool precisa ser um identificador Python: vira `from tools.x import x` no script."""
+    return isinstance(name, str) and bool(_TOOL_NAME_RE.match(name))
+
+
 def _screen_key(url: str) -> str:
     """
     Chave única de tela: path da URL (sem query string) + fragment.
@@ -302,7 +310,10 @@ def _actions_fingerprint(actions: list[dict]) -> str:
 
 
 def _read_tool_fingerprint(tool_path: Path) -> str | None:
-    """Lê o fingerprint salvo no cabeçalho da tool (comentário # actions_fp: <hash>)."""
+    """
+    Lê o fingerprint salvo no cabeçalho da tool (comentário # actions_fp: <hash>).
+    Se o arquivo não tiver o cabeçalho (tool criada/editada à mão), usa o fingerprint do banco.
+    """
     try:
         first_lines = tool_path.read_text(encoding="utf-8").splitlines()[:3]
         for line in first_lines:
@@ -310,7 +321,11 @@ def _read_tool_fingerprint(tool_path: Path) -> str | None:
                 return line.split(":", 1)[1].strip()
     except Exception:
         pass
-    return None
+    try:
+        from db import get_tool_fingerprint
+        return get_tool_fingerprint(tool_path.stem)
+    except Exception:
+        return None
 
 
 def resolve_tool_names(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]) -> list[str]:
@@ -347,11 +362,11 @@ def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str
     - Se fingerprint igual: reutiliza (mesmo comportamento)
     - Se fingerprint diferente: gera nova tool com sufixo _v2, _v3, etc.
     """
-    from tool_generator import generate_tool_from_actions
+    from tool_generator import expects_url_change, generate_tool_from_actions
 
     saved = []
 
-    for step in named_steps:
+    for index, step in enumerate(named_steps):
         base_name = step["tool_name"]
         actions = step["actions"]
         new_fp = _actions_fingerprint(actions)
@@ -371,8 +386,16 @@ def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str
             candidate = f"{base_name}_v{version}"
             version += 1
         else:
-            # candidate não existe — gera nova tool com fingerprint no cabeçalho
-            generate_tool_from_actions(candidate, actions, fingerprint=new_fp)
+            # candidate não existe — gera nova tool (só é salva se o usuário aprovar no terminal)
+            path = generate_tool_from_actions(
+                candidate, actions, fingerprint=new_fp,
+                expect_url_change=expects_url_change(named_steps, index),
+            )
+            if path is None:
+                step["tool_name"] = candidate
+                step["rejected"] = True
+                continue
+            existing_tools.add(candidate)
 
         # Garante que o nome usado vá para o step (pode ter mudado para _v2 etc.)
         step["tool_name"] = candidate
@@ -385,24 +408,45 @@ def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str
 # Saída: script de teste Playwright completo
 # ---------------------------------------------------------------------------
 
-def save_test_script(workflow_name: str, named_steps: list[dict], tests_dir: Path):
-    """Gera script de teste Playwright completo que executa o fluxo inteiro."""
-    func_names = [s["tool_name"] for s in named_steps]
+def build_script(
+    workflow_name: str,
+    steps: list[str],
+    headless: bool | None = None,
+    cdp_url: str | None = None,
+    start_index: int = 0,
+) -> str:
+    """
+    Gera o script Playwright que executa as tools em sequência.
+    É o mesmo código para o preview, para a execução pela interface e para o script salvo em tests/.
 
-    # imports das tools
-    import_lines = "\n".join(
-        f"from tools.{fn} import {fn}" for fn in func_names
+    - headless=None: decide em tempo de execução pela variável RPA_HEADLESS (scripts salvos).
+    - cdp_url=None: usa a variável CDP_URL (padrão http://localhost:9222).
+    - start_index: índice absoluto do primeiro step (usado ao começar de uma etapa específica),
+      para que os marcadores __RUNNING__/__STEP_RESULT__ apontem para a posição certa no fluxo.
+
+    Semântica de cada step: True/None → PASS; False ou exceção → FAIL. O fluxo para no primeiro
+    FAIL, porque os próximos passos dependem da tela deixada pelo anterior.
+    A última linha impressa é sempre "true" ou "false".
+    """
+    for s in steps:
+        if not is_valid_tool_name(s):
+            raise ValueError(f"Nome de tool inválido: {s!r}")
+
+    import_lines = "\n".join(f"from tools.{s} import {s}" for s in dict.fromkeys(steps))
+    step_lines = "\n".join(
+        f"    ({start_index + i}, {s!r}, {s})," for i, s in enumerate(steps)
     )
+    headless_expr = repr(headless) if headless is not None else 'os.environ.get("RPA_HEADLESS", "0") == "1"'
+    cdp_expr = repr(cdp_url) if cdp_url else 'os.environ.get("CDP_URL") or "http://localhost:9222"'
 
-    # corpo do teste: chama cada função e coleta resultado True/False
-    result_lines = "\n".join(
-        f"        results[{fn!r}] = await {fn}(page)" for fn in func_names
-    )
-
-    script = f"""\
+    return f"""\
+# rpa_steps: {json.dumps(list(steps))}
 import asyncio
+import os
+import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -410,38 +454,101 @@ from playwright.async_api import async_playwright
 
 {import_lines}
 
+WORKFLOW_NAME = {workflow_name!r}
+HEADLESS = {headless_expr}
+CDP_URL = {cdp_expr}
+
+STEPS = [
+{step_lines}
+]
+
+
+def _cdp_endpoint(url: str) -> str:
+    \"\"\"
+    Normaliza o endereço CDP. O Chrome recusa conexões cujo Host não seja um IP ou
+    localhost, então nomes como host.docker.internal são resolvidos para IP aqui.
+    \"\"\"
+    parsed = urlparse(url if "://" in url else f"http://{{url}}")
+    host = parsed.hostname or "localhost"
+    if host != "localhost":
+        try:
+            host = socket.gethostbyname(host)
+        except OSError:
+            pass
+    return f"{{parsed.scheme or 'http'}}://{{host}}:{{parsed.port or 9222}}"
+
 
 async def run():
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp('http://localhost:9222')
-        page = browser.contexts[0].pages[0]
+        if HEADLESS:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+        else:
+            browser = await p.chromium.connect_over_cdp(_cdp_endpoint(CDP_URL))
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
 
-        results: dict[str, bool] = {{}}
+        passed: list[str] = []
+        failed: str | None = None
+        for idx, name, func in STEPS:
+            print(f"__RUNNING__{{idx}}:{{name}}", flush=True)
+            try:
+                ok = (await func(page)) is not False
+                erro = "" if ok else "a tool retornou False"
+            except Exception as e:
+                ok = False
+                erro = (str(e).strip().splitlines() or [type(e).__name__])[0]
+            print(f"__STEP_RESULT__{{idx}}:{{'ok' if ok else 'fail'}}:{{name}}", flush=True)
+            if ok:
+                passed.append(name)
+                print(f"  [PASS] {{name}}", flush=True)
+            else:
+                failed = name
+                print(f"  [FAIL] {{name}}: {{erro}}", flush=True)
+                break
 
-{result_lines}
-
-        print()
         print("=" * 50)
-        print(f"Relatório QA — {workflow_name}")
+        print(f"Relatório — {{WORKFLOW_NAME}}")
         print("=" * 50)
-        passed = [k for k, v in results.items() if v]
-        failed = [k for k, v in results.items() if not v]
-        for step in passed:
-            print(f"  [PASS] {{step}}")
-        for step in failed:
-            print(f"  [FAIL] {{step}}")
-        print("-" * 50)
-        print(f"  Total: {{len(results)}} | Passed: {{len(passed)}} | Failed: {{len(failed)}}")
+        nao_executados = len(STEPS) - len(passed) - (1 if failed else 0)
+        print(f"  Passaram: {{len(passed)}} | Falhou: {{1 if failed else 0}} | Não executados: {{nao_executados}}")
         print("=" * 50)
-        sys.exit(0 if not failed else 1)
+        print("true" if failed is None else "false", flush=True)
+        sys.exit(0 if failed is None else 1)
 
 
 if __name__ == '__main__':
     asyncio.run(run())
 """
 
-    path = tests_dir / f"{_slug(workflow_name)}.py"
-    path.write_text(script, encoding="utf-8")
+
+def read_script_steps(code: str) -> list[str]:
+    """Extrai a lista de steps de um script salvo (cabeçalho # rpa_steps, ou formato antigo)."""
+    first = code.splitlines()[0] if code else ""
+    if first.startswith("# rpa_steps:"):
+        try:
+            return json.loads(first.split(":", 1)[1])
+        except ValueError:
+            pass
+    steps = []
+    for line in code.splitlines():
+        if line.startswith("        results["):
+            steps.append(line.strip().split("'")[1])
+    return steps
+
+
+def test_script_path(workflow_name: str, tests_dir: Path, script_name: str | None = None) -> Path:
+    """Caminho do script salvo: script_name (sanitizado) ou slug do nome do workflow."""
+    stem = re.sub(r"[^a-zA-Z0-9_]", "_", script_name) if script_name else _slug(workflow_name)
+    return tests_dir / f"{stem or 'workflow'}.py"
+
+
+def save_test_script(workflow_name: str, named_steps: list[dict], tests_dir: Path,
+                     script_name: str | None = None) -> Path:
+    """Gera script de teste Playwright completo que executa o fluxo inteiro."""
+    func_names = [s["tool_name"] for s in named_steps]
+    path = test_script_path(workflow_name, tests_dir, script_name)
+    path.write_text(build_script(workflow_name, func_names), encoding="utf-8")
     print(f"  [test] gerado: {path}")
     return path
 

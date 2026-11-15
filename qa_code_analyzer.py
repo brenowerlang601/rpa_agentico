@@ -6,10 +6,15 @@ Suporta: Java, JavaScript, TypeScript, APEX (Salesforce).
 """
 
 import hashlib
+import logging
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Diretório temporário onde repos clonados ficam em cache
 _REPOS_CACHE = Path(tempfile.gettempdir()) / "rpa_repos"
@@ -24,6 +29,11 @@ _LANG_EXTENSIONS = {
 }
 
 _ALL_EXTENSIONS = {ext: lang for lang, exts in _LANG_EXTENSIONS.items() for ext in exts}
+
+# Um lock por repositório: duas requisições simultâneas do mesmo repo não podem clonar
+# no mesmo diretório ao mesmo tempo.
+_repo_locks: dict[str, threading.Lock] = {}
+_repo_locks_guard = threading.Lock()
 
 
 def fetch_function_from_repo(repo_url: str, function_name: str, hint_file_path: str = "") -> dict:
@@ -57,23 +67,67 @@ def _repo_cache_dir(repo_url: str) -> Path:
     return _REPOS_CACHE / f"{name}_{slug}"
 
 
+def _repo_lock(repo_dir: Path) -> threading.Lock:
+    with _repo_locks_guard:
+        return _repo_locks.setdefault(str(repo_dir), threading.Lock())
+
+
+def _is_valid_clone(repo_dir: Path) -> bool:
+    """Um clone interrompido (timeout) deixa a pasta parcial — ela não pode ser usada como cache."""
+    if not (repo_dir / ".git").exists():
+        return False
+    r = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "--verify", "HEAD"],
+        capture_output=True, timeout=30,
+    )
+    return r.returncode == 0
+
+
 def _clone_or_update(repo_url: str) -> Path:
-    """Clona o repo com --depth=1. Se já clonado, atualiza via fetch."""
+    """
+    Clona o repo com --depth=1. Se já clonado, busca a versão mais recente e atualiza os arquivos.
+    O clone é feito numa pasta temporária e só depois movido para o cache, para que um clone
+    interrompido nunca seja considerado válido.
+    """
     repo_dir = _repo_cache_dir(repo_url)
 
-    if repo_dir.exists():
-        # Tenta atualizar silenciosamente; ignora erro (sem rede, repo privado, etc.)
-        subprocess.run(
-            ["git", "-C", str(repo_dir), "fetch", "--depth=1", "origin"],
-            capture_output=True, timeout=60,
-        )
-        return repo_dir
+    with _repo_lock(repo_dir):
+        if repo_dir.exists() and not _is_valid_clone(repo_dir):
+            shutil.rmtree(repo_dir, ignore_errors=True)
 
-    subprocess.run(
-        ["git", "clone", "--depth=1", repo_url, str(repo_dir)],
-        capture_output=True, timeout=120, check=True,
-    )
-    return repo_dir
+        if repo_dir.exists():
+            fetch = subprocess.run(
+                ["git", "-C", str(repo_dir), "fetch", "--depth=1", "origin", "HEAD"],
+                capture_output=True, timeout=60,
+            )
+            if fetch.returncode == 0:
+                # fetch sozinho não altera os arquivos — sem o reset os testes eram gerados
+                # sempre sobre o código do primeiro clone
+                subprocess.run(
+                    ["git", "-C", str(repo_dir), "reset", "--hard", "FETCH_HEAD"],
+                    capture_output=True, timeout=60, check=True,
+                )
+            else:
+                # Sem rede ou repo privado: segue com a cópia em cache
+                logger.warning(f"[QA] Não foi possível atualizar {repo_url}; usando cópia em cache.")
+            return repo_dir
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix=repo_dir.name + "_", dir=_REPOS_CACHE))
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth=1", repo_url, str(tmp_dir)],
+                capture_output=True, timeout=120, check=True,
+            )
+            tmp_dir.rename(repo_dir)
+        except subprocess.CalledProcessError as e:
+            msg = (e.stderr or b"").decode(errors="replace").strip().splitlines()
+            raise ValueError(f"Falha ao clonar {repo_url}: {msg[-1] if msg else e}") from e
+        except subprocess.TimeoutExpired as e:
+            raise ValueError(f"Tempo esgotado ao clonar {repo_url}") from e
+        finally:
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        return repo_dir
 
 
 def _find_function(repo_dir: Path, function_name: str, hint_file_path: str = "") -> dict:
@@ -85,7 +139,10 @@ def _find_function(repo_dir: Path, function_name: str, hint_file_path: str = "")
     candidates = []
 
     if hint_file_path:
-        hint = repo_dir / hint_file_path
+        # O arquivo indicado precisa estar dentro do repositório (bloqueia ../ e caminhos absolutos)
+        hint = (repo_dir / hint_file_path).resolve()
+        if not hint.is_relative_to(repo_dir.resolve()):
+            raise ValueError("O arquivo informado precisa estar dentro do repositório.")
         if hint.exists() and hint.suffix.lower() in _ALL_EXTENSIONS:
             candidates.append(hint)
 
@@ -177,16 +234,26 @@ def _extract_js_style(source: str, name: str) -> str | None:
         re.compile(r'(?:export\s+)?(?:async\s+)?function\s+' + re.escape(name) + r'\s*\('),
         # const nomeFuncao = (... => ou function
         re.compile(r'(?:export\s+)?(?:const|let|var)\s+' + re.escape(name) + r'\s*=\s*(?:async\s+)?(?:\([^)]*\)|[\w]+)\s*=>'),
-        # nomeFuncao( dentro de classe (método)
-        re.compile(r'(?:(?:public|private|protected|static|async|override)\s+)*' + re.escape(name) + r'\s*\('),
+        # método de classe: só a definição (parâmetros seguidos de tipo opcional e "{"),
+        # para não casar chamadas como `const x = nomeFuncao(1);`
+        re.compile(
+            r'^[ \t]*(?:(?:public|private|protected|static|async|override|readonly|get|set)\s+)*'
+            + re.escape(name)
+            + r'\s*(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[^{;=\n]+)?\s*\{',
+            re.MULTILINE,
+        ),
     ]
 
     for pattern in patterns:
         m = pattern.search(source)
         if m:
             start = m.start()
-            # Encontra o { de abertura (pode ter parâmetros com tipos TS entre os parênteses)
-            brace_idx = source.find("{", m.end())
+            # Encontra o { de abertura (pode ter parâmetros com tipos TS entre os parênteses).
+            # O padrão de método já termina no próprio "{".
+            if source[m.end() - 1] == "{":
+                brace_idx = m.end() - 1
+            else:
+                brace_idx = source.find("{", m.end())
             if brace_idx == -1:
                 # Arrow function de linha única: const f = () => expr
                 end_line = source.find("\n", m.end())
@@ -198,29 +265,41 @@ def _extract_js_style(source: str, name: str) -> str | None:
 
 
 def _find_closing_brace(source: str, open_pos: int) -> int:
-    """Encontra o índice do } que fecha o { em open_pos."""
+    """
+    Encontra o índice do } que fecha o { em open_pos.
+    Ignora chaves dentro de strings ('...', "...", `...`) e comentários (// e /* */),
+    respeitando caracteres escapados.
+    """
     depth = 0
-    in_string_single = False
-    in_string_double = False
-    in_template = False
+    quote: str | None = None
     i = open_pos
-    while i < len(source):
+    n = len(source)
+    while i < n:
         ch = source[i]
-        if ch == "'" and not in_string_double and not in_template:
-            in_string_single = not in_string_single
-        elif ch == '"' and not in_string_single and not in_template:
-            in_string_double = not in_string_double
-        elif ch == '`' and not in_string_single and not in_string_double:
-            in_template = not in_template
-        elif not in_string_single and not in_string_double and not in_template:
-            if ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    return i
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"', "`"):
+            quote = ch
+        elif source.startswith("//", i):
+            nl = source.find("\n", i)
+            i = n if nl == -1 else nl
+            continue
+        elif source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
         i += 1
-    return len(source) - 1
+    return n - 1
 
 
 def _extract_file_context(source: str, lang: str) -> str:

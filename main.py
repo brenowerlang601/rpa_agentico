@@ -8,12 +8,7 @@ JSON_RPA_DIR = Path("json_rpa")
 
 
 def main():
-    files = list_json_rpa(JSON_RPA_DIR)
-
-    if not files:
-        print("Nenhum arquivo JSON encontrado em json_rpa/")
-        sys.exit(1)
-
+    # O argumento tem prioridade: funciona mesmo com json_rpa/ vazio
     if len(sys.argv) > 1:
         selected = Path(sys.argv[1])
         if not selected.exists():
@@ -21,7 +16,16 @@ def main():
         if not selected.exists():
             print(f"Arquivo nao encontrado: {sys.argv[1]}")
             sys.exit(1)
-    elif len(files) == 1:
+        run_from_json(selected)
+        return
+
+    files = list_json_rpa(JSON_RPA_DIR)
+
+    if not files:
+        print("Nenhum arquivo JSON encontrado em json_rpa/")
+        sys.exit(1)
+
+    if len(files) == 1:
         selected = files[0]
     else:
         print("JSONs disponíveis em json_rpa/:")
