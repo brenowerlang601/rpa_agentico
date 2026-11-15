@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 TOOLS_DIR = Path("tools")
 TESTS_DIR = Path("tests")
@@ -112,12 +113,14 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
                     break
                 count += 1
                 j += 1
-            actions.append({"type": "key_press", "key": key, "count": count, "url": url, "xpath": xpath, "css_selector": css})
+            actions.append({"type": "key_press", "key": key, "count": count, "url": url, "xpath": xpath,
+                            "css_selector": css, "timestamp": action.get("timestamp")})
             i = j
             continue
 
         if atype == "navigation":
-            actions.append({"type": "navigation", "url": action.get("url", "")})
+            actions.append({"type": "navigation", "url": action.get("url", ""),
+                            "timestamp": action.get("timestamp")})
             i += 1
             continue
 
@@ -138,6 +141,7 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
                     "target_text": target or inp.get("targetText", "").strip(),
                     "value": inp.get("value", ""),
                     "url": action.get("url", ""),
+                    "timestamp": action.get("timestamp"),
                 })
                 i = j + 1
             else:
@@ -146,7 +150,9 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
                     "xpath": xpath,
                     "css_selector": action.get("cssSelector", ""),
                     "target_text": target,
+                    "element_text": (action.get("elementText") or "").strip(),
                     "url": action.get("url", ""),
+                    "timestamp": action.get("timestamp"),
                 })
                 i += 1
             continue
@@ -159,13 +165,182 @@ def _normalize_actions(raw_steps: list[dict]) -> list[dict]:
                 "target_text": action.get("targetText", "").strip(),
                 "value": action.get("value", ""),
                 "url": action.get("url", ""),
+                "timestamp": action.get("timestamp"),
             })
             i += 1
             continue
 
         i += 1
 
+    for a in actions:
+        # A extensão grava campos de senha como "********": o valor real vem de um secret
+        if a["type"] == "fill" and _MASKED_RE.match(a.get("value") or ""):
+            a["masked"] = True
+    _add_wait_timeouts(actions)
     return actions
+
+
+# Valor mascarado pela extensão em campos de senha
+_MASKED_RE = re.compile(r"^\*{3,}$")
+
+# Espera mínima/máxima por elemento e intervalo que indica "algo demorado aconteceu"
+DEFAULT_TIMEOUT_MS = 10000
+MAX_TIMEOUT_MS = 180000
+SLOW_GAP_MS = 3000
+# Acima disso, uma sequência na mesma URL é quebrada em mais de uma tool
+MAX_ACTIONS_PER_TOOL = 6
+
+
+def _gap_ms(prev: dict | None, cur: dict | None) -> int:
+    """Tempo entre duas ações na gravação (0 se não houver timestamps)."""
+    if not prev or not cur or not prev.get("timestamp") or not cur.get("timestamp"):
+        return 0
+    return max(0, int(cur["timestamp"]) - int(prev["timestamp"]))
+
+
+def _add_wait_timeouts(actions: list[dict]) -> None:
+    """
+    Define quanto cada ação pode esperar pelo seu elemento, a partir do tempo que o usuário
+    esperou na gravação. Um elemento que levou 24 s para aparecer (ex.: resposta de IA) não
+    pode ter o limite fixo de 10 s.
+    """
+    prev = None
+    for a in actions:
+        gap = _gap_ms(prev, a)
+        a["timeout_ms"] = min(MAX_TIMEOUT_MS, max(DEFAULT_TIMEOUT_MS, gap * 2 + 5000))
+        prev = a
+
+
+LOGIN_KEYWORDS = {"usuario", "senha", "login", "password", "user", "email", "pass", "username"}
+
+
+def is_login_field(action: dict) -> bool:
+    """Campo de usuário/senha de uma tela de login."""
+    if action.get("type") != "fill":
+        return False
+    if action.get("masked") or action.get("secret"):
+        return True
+    texto = _slug(action.get("target_text", ""))
+    seletor = (action.get("xpath", "") + " " + action.get("css_selector", "")).lower()
+    return texto in LOGIN_KEYWORDS or any(f'"{kw}"' in seletor or f"'{kw}'" in seletor for kw in LOGIN_KEYWORDS)
+
+
+def _login_end_index(actions: list[dict]) -> int | None:
+    """
+    Índice da ação que envia o login (clique ou Enter depois do último campo de login),
+    ou None se o trecho não faz login.
+    """
+    login_idx = [i for i, a in enumerate(actions) if is_login_field(a)]
+    if not login_idx:
+        return None
+    for i in range(login_idx[-1] + 1, len(actions)):
+        a = actions[i]
+        if a["type"] == "click" or (a["type"] == "key_press" and a.get("key") == "Enter"):
+            return i
+    return None
+
+
+def login_field(actions: list[dict]) -> dict | None:
+    """Primeiro campo de login do trecho (usado para verificar se a sessão já está aberta)."""
+    if _login_end_index(actions) is None:
+        return None
+    return next((a for a in actions if is_login_field(a)), None)
+
+
+def _split_same_url(actions: list[dict]) -> list[list[dict]]:
+    """
+    Quebra uma sequência longa feita numa mesma URL (SPAs e ERPs que trocam de tela sem
+    mudar a URL) em etapas menores, nos pontos naturais:
+    - o login vira uma etapa própria (pode ser pulado se a sessão já estiver aberta);
+    - depois de um clique/Enter seguido de espera longa (troca de tela, processamento);
+    - depois de um clique que envia campos preenchidos (submit de formulário).
+    Pedaços de uma ação só são juntados ao seguinte.
+    """
+    login_end = _login_end_index(actions)
+    if len(actions) <= MAX_ACTIONS_PER_TOOL:
+        # Curto: só separa o login, se houver mais coisa depois dele
+        if login_end is not None and login_end < len(actions) - 1:
+            return [actions[:login_end + 1], actions[login_end + 1:]]
+        return [actions]
+
+    parts: list[list[dict]] = []
+    cur: list[dict] = []
+    for k, a in enumerate(actions):
+        cur.append(a)
+        nxt = actions[k + 1] if k + 1 < len(actions) else None
+        if nxt is None:
+            break
+        boundary = k == login_end
+        if a["type"] == "click" or (a["type"] == "key_press" and a.get("key") == "Enter"):
+            if _gap_ms(a, nxt) >= SLOW_GAP_MS:
+                boundary = True
+            elif a["type"] == "click" and any(x["type"] == "fill" for x in cur):
+                boundary = True
+        if len(cur) >= MAX_ACTIONS_PER_TOOL * 2:
+            boundary = True
+        if boundary:
+            parts.append(cur)
+            cur = []
+    if cur:
+        parts.append(cur)
+
+    merged: list[list[dict]] = []
+    carry: list[dict] = []
+    for idx, part in enumerate(parts):
+        part = carry + part
+        carry = []
+        is_login_part = _login_end_index(part) is not None
+        if len(part) == 1 and idx < len(parts) - 1 and not is_login_part:
+            carry = part
+            continue
+        merged.append(part)
+    if carry:
+        if merged and _login_end_index(merged[-1]) is None:
+            merged[-1].extend(carry)
+        else:
+            merged.append(carry)
+    return merged
+
+
+def annotate_masked(named_steps: list[dict]) -> list[dict]:
+    """
+    Dá um id estável a cada campo mascarado (senha) e devolve a lista para a interface pedir
+    o secret: [{id, tool_name, target_text, suggested_name}].
+    """
+    fields = []
+    for gi, step in enumerate(named_steps):
+        for ai, a in enumerate(step.get("actions") or []):
+            if a.get("masked") and not a.get("secret"):
+                a["masked_id"] = f"g{gi}a{ai}"
+                host = _slug(urlparse(a.get("url", "")).hostname or "app").upper()
+                campo = _slug(a.get("target_text", "")).upper() or "SENHA"
+                fields.append({
+                    "id": a["masked_id"],
+                    "tool_name": step.get("tool_name"),
+                    "target_text": a.get("target_text", ""),
+                    "suggested_name": f"{host}_{campo}",
+                })
+    return fields
+
+
+def apply_secrets(named_steps: list[dict], mapping: dict[str, str]) -> None:
+    """
+    Troca o valor mascarado pelo secret escolhido: {masked_id: NOME}.
+    Levanta ValueError se algum campo mascarado ficar sem secret.
+    """
+    annotate_masked(named_steps)
+    missing = []
+    for step in named_steps:
+        for a in step.get("actions") or []:
+            if a.get("masked") and not a.get("secret"):
+                name = mapping.get(a.get("masked_id", ""))
+                if not name:
+                    missing.append(a.get("target_text") or a.get("masked_id"))
+                    continue
+                a["secret"] = name
+                a.pop("value", None)
+    if missing:
+        raise ValueError(f"Campos de senha sem secret definido: {', '.join(missing)}")
 
 
 def group_into_micro_processes(actions: list[dict]) -> list[dict]:
@@ -200,7 +375,12 @@ def group_into_micro_processes(actions: list[dict]) -> list[dict]:
     if current_actions:
         groups.append({"url": current_url, "actions": current_actions})
 
-    return groups
+    # Mesma URL não quer dizer mesma tela: quebra sequências longas em etapas menores
+    split: list[dict] = []
+    for g in groups:
+        for part in _split_same_url(g["actions"]):
+            split.append({"url": g["url"], "actions": part})
+    return split
 
 
 def name_groups(groups: list[dict]) -> list[dict]:
@@ -219,8 +399,6 @@ def name_groups(groups: list[dict]) -> list[dict]:
     named = []
     name_counts: dict[str, int] = {}
 
-    LOGIN_KEYWORDS = {"usuario", "senha", "login", "password", "user", "email", "pass"}
-
     for group in groups:
         url = group["url"]
         actions = group["actions"]
@@ -235,16 +413,15 @@ def name_groups(groups: list[dict]) -> list[dict]:
         if frag_slug and not re.fullmatch(r"[0-9]+x?", fragment):
             page_slug = f"{path_slug}_{frag_slug}" if path_slug else frag_slug
         else:
-            page_slug = path_slug or "pagina"
+            page_slug = path_slug or _slug(parsed.hostname or "") or "pagina"
 
         # Classifica o grupo pelo conteúdo das ações
         fills = [a for a in actions if a["type"] == "fill"]
         clicks = [a for a in actions if a["type"] == "click"]
         navigations = [a for a in actions if a["type"] == "navigation"]
 
-        fill_targets = {_slug(f.get("target_text", "")) for f in fills}
-        is_login = bool(fill_targets & LOGIN_KEYWORDS) or any(
-            kw in page_slug for kw in ("login", "senha", "auth", "acesso")
+        is_login = _login_end_index(actions) is not None or (
+            bool(fills) and any(kw in page_slug for kw in ("login", "senha", "auth", "acesso"))
         )
 
         if is_login:
@@ -299,7 +476,7 @@ def _actions_fingerprint(actions: list[dict]) -> str:
             a.get("type", ""),
             a.get("xpath", ""),
             a.get("css_selector", ""),
-            a.get("value", ""),
+            "<secret>" if (a.get("masked") or a.get("secret")) else a.get("value", ""),
             a.get("key", ""),
             str(a.get("count", 1)),
             a.get("url", ""),
@@ -355,6 +532,33 @@ def resolve_tool_names(named_steps: list[dict], tools_dir: Path, existing_tools:
     return resolved
 
 
+def resolve_secrets_in_terminal(named_steps: list[dict]) -> None:
+    """Linha de comando: pede um secret (existente ou novo) para cada campo de senha mascarado."""
+    import getpass
+
+    import secrets_store
+
+    fields = annotate_masked(named_steps)
+    if not fields:
+        return
+    existing = {s["name"] for s in secrets_store.list_secrets()}
+    mapping = {}
+    for f in fields:
+        print(f"\nCampo de senha '{f['target_text']}' em {f['tool_name']} foi gravado como ********.")
+        if existing:
+            print(f"Secrets existentes: {', '.join(sorted(existing))}")
+        while True:
+            name = input(f"Nome do secret [{f['suggested_name']}]: ").strip() or f["suggested_name"]
+            if secrets_store.is_valid_name(name):
+                break
+            print("Nome inválido: use MAIÚSCULAS, números e _ (ex.: ERP_SENHA)")
+        if name not in existing:
+            secrets_store.set_secret(name, getpass.getpass(f"Valor de {name}: "))
+            existing.add(name)
+        mapping[f["id"]] = name
+    apply_secrets(named_steps, mapping)
+
+
 def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str]):
     """
     Gera tools para cada micro-processo via LLM (tool_generator).
@@ -364,6 +568,7 @@ def save_tools(named_steps: list[dict], tools_dir: Path, existing_tools: set[str
     """
     from tool_generator import expects_url_change, generate_tool_from_actions
 
+    resolve_secrets_in_terminal(named_steps)
     saved = []
 
     for index, step in enumerate(named_steps):

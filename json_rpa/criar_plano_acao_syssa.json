@@ -1,0 +1,148 @@
+{
+  "workflow_analysis": "Recorded workflow with 13 steps. ",
+  "name": "Criar plano de acao Syssa",
+  "description": "Login, Aprofundar com IA nos indicadores vitais, adotar uma alternativa e conferir em Planos de Ação",
+  "version": "1.0",
+  "input_schema": [],
+  "steps": [
+    {
+      "type": "navigation",
+      "timestamp": 1794774225151,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774227252,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"user\"]",
+      "elementTag": "INPUT",
+      "elementText": "",
+      "targetText": "Usuário"
+    },
+    {
+      "type": "input",
+      "timestamp": 1794774227823,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"user\"]",
+      "elementTag": "INPUT",
+      "value": "admin",
+      "targetText": "Usuário"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774228302,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"password\"]",
+      "elementTag": "INPUT",
+      "elementText": "",
+      "targetText": "Senha"
+    },
+    {
+      "type": "input",
+      "timestamp": 1794774229058,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"password\"]",
+      "elementTag": "INPUT",
+      "value": "********",
+      "targetText": "Senha"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774229539,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div/form/button",
+      "elementTag": "BUTTON",
+      "elementText": "Entrar",
+      "targetText": "Entrar",
+      "cssSelector": "button.inline-flex.items-center.justify-center.gap-2.h-11.px-4.text-sm.font-medium.rounded-md.transition-colors.bg-brand-600.text-white.w-full[type=\"submit\"]"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774232567,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div[2]/div[2]/div[2]/div[1]/button[2]",
+      "elementTag": "BUTTON",
+      "elementText": "Aprofundar com IA",
+      "targetText": "Aprofundar com IA",
+      "cssSelector": "button.run[title*=\"O Syssa lê os números deste recorte e sugere caminhos com plano de ação\"]"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774256685,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div[5]/div/div/div[2]/div[3]/div[2]/div[4]",
+      "elementTag": "DIV",
+      "elementText": "ver plano →",
+      "targetText": "Esforço Médio"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774258212,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div[5]/div/div/div[2]/div[6]/button[2]",
+      "elementTag": "BUTTON",
+      "elementText": "✓ Adotar plano",
+      "targetText": "✓ Adotar plano",
+      "cssSelector": "button.ghost"
+    },
+    {
+      "type": "scroll",
+      "timestamp": 1794774258225,
+      "tabId": 185224924,
+      "targetId": 806,
+      "scrollX": 0,
+      "scrollY": 583,
+      "url": "http://localhost:8001/"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774262383,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div[5]/div/div/div[2]/div[6]/button[1]",
+      "elementTag": "BUTTON",
+      "elementText": "Fechar",
+      "targetText": "Fechar",
+      "cssSelector": "button.ghost"
+    },
+    {
+      "type": "click",
+      "timestamp": 1794774263461,
+      "tabId": 185224924,
+      "url": "http://localhost:8001/",
+      "frameUrl": "http://localhost:8001/",
+      "xpath": "//*[@id=\"root\"]/div/div[2]/aside/div[4]/button",
+      "elementTag": "BUTTON",
+      "elementText": "Planos de Ação",
+      "targetText": "Planos de Ação",
+      "cssSelector": "button.nav-item"
+    },
+    {
+      "type": "scroll",
+      "timestamp": 1794774263474,
+      "tabId": 185224924,
+      "targetId": 65,
+      "scrollX": 0,
+      "scrollY": 11,
+      "url": "http://localhost:8001/"
+    }
+  ]
+}

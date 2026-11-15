@@ -257,6 +257,18 @@
     .qa-field label { display: block; font-size: 11px; color: #718096; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 5px; }
     .qa-field input { width: 100%; background: #1a1d2e; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 13px; text-overflow: ellipsis; }
     .qa-field input:focus { outline: none; border-color: #38bdf8; }
+    /* Secrets */
+    .secret-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #1a1d2e; border: 1px solid #2d3748; border-radius: 8px; min-width: 0; }
+    .secret-row .secret-info { flex: 1; min-width: 0; }
+    .secret-row .secret-name { font-family: 'Fira Code', monospace; font-size: 13px; color: #fbbf24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .secret-row .secret-meta { font-size: 11px; color: #718096; margin-top: 3px; overflow-wrap: anywhere; }
+    .secret-row .btn { flex-shrink: 0; }
+    .secret-ask { border: 1px solid #2d3748; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .secret-ask .secret-ask-title { font-size: 13px; color: #e2e8f0; overflow-wrap: anywhere; }
+    .secret-ask .secret-ask-title small { color: #718096; }
+    .secret-ask label.opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #cbd5e0; cursor: pointer; }
+    .secret-ask select, .secret-ask input[type=text], .secret-ask input[type=password] { width: 100%; background: #1a1d2e; border: 1px solid #4a5568; color: #e2e8f0; padding: 7px 9px; border-radius: 6px; font-size: 13px; }
+    .secret-ask select:disabled, .secret-ask input:disabled { opacity: .45; }
     .qa-status-bar { font-size: 12px; color: #718096; padding: 8px 10px; background: #1a1d2e; border-radius: 6px; border: 1px solid #2d3748; min-height: 36px; line-height: 1.5; overflow-wrap: anywhere; }
     .qa-status-bar code { overflow-wrap: anywhere; }
     .qa-badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: #2d3748; color: #a0aec0; }
@@ -292,6 +304,7 @@
   <button class="btn btn-outline btn-sm hide-in-test" onclick="loadWorkflow()" title="Carregar fluxo salvo" aria-label="Carregar fluxo">📂<span class="lbl-opt"> Carregar fluxo...</span></button>
   <button class="btn btn-success hide-in-test" onclick="saveWorkflow()" title="Salvar script">💾 Salvar<span class="lbl-opt"> script</span></button>
   <button class="btn btn-outline btn-sm hide-in-test" onclick="openQAPanel()" style="color:#38bdf8; border-color:#0ea5e9;" title="Gerar testes a partir de um repositório de código" aria-label="Gerar Testes">🧪<span class="lbl-opt"> Gerar Testes</span></button>
+  <button class="btn btn-outline btn-sm hide-in-test" onclick="openSecretsPanel()" style="color:#fbbf24; border-color:#b45309;" title="Secrets: senhas e valores sensíveis usados pelas tools" aria-label="Secrets">🔑<span class="lbl-opt"> Secrets</span></button>
   <button class="btn btn-test-mode" id="testModeBtn" onclick="toggleTestMode()" title="Modo Teste (tela compacta)" aria-label="Modo Teste">⬡<span class="lbl-opt"> Modo Teste</span></button>
   <label class="headless-toggle" title="Headless: executa sem abrir janela do browser">
     <input type="checkbox" id="headlessToggle" checked onchange="updateHeadlessLabel()">
@@ -422,6 +435,24 @@
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="hideModal('saveModal')">Cancelar</button>
       <button class="btn btn-success" id="confirmSaveBtn" onclick="confirmSave()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: campos de senha detectados na gravação -->
+<div class="modal-overlay hidden" id="secretsAskModal" role="dialog" aria-modal="true" aria-labelledby="secretsAskTitle">
+  <div class="modal" style="width:520px;">
+    <div class="modal-header">
+      <span class="modal-title" id="secretsAskTitle">🔑 Campos de senha detectados</span>
+      <button class="btn btn-outline btn-sm" onclick="cancelSecretsAsk()">Cancelar</button>
+    </div>
+    <div class="modal-body scroll" style="padding:20px; gap:12px;">
+      <p style="font-size:12px; color:#a0aec0;">A extensão grava senhas como <code>********</code>. Escolha de qual secret cada campo vai ler o valor — o código gerado usa <code>secret("NOME")</code> e a senha nunca fica no código nem é enviada ao LLM.</p>
+      <div id="secretsAskList" style="display:flex; flex-direction:column; gap:12px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cancelSecretsAsk()">Cancelar</button>
+      <button class="btn btn-success" id="secretsAskOk" onclick="confirmSecretsAsk()">Continuar</button>
     </div>
   </div>
 </div>
@@ -692,6 +723,7 @@ const MODAL_CLOSE_HANDLERS = {
   editorModal: () => closeModal(),
   newToolModal: () => closeNewToolModal(),
   renameModal: () => closeRenameModal(),
+  secretsAskModal: () => cancelSecretsAsk(),
 };
 
 function openModal(id) {
@@ -727,6 +759,7 @@ function initModals() {
     const top = _modalStack[_modalStack.length - 1];
     if (top) { e.preventDefault(); requestCloseModal(top); return; }
     if ($('qaPanel').classList.contains('open')) closeQAPanel();
+    if ($('secretsPanel').classList.contains('open')) closeSecretsPanel();
   });
 }
 
@@ -1281,13 +1314,22 @@ function _applyImportedFlow(data) {
   renderLibrary();
   renderFlow();
   refreshPreview();
-  startToolGeneration(Array.isArray(data.named_steps) ? data.named_steps : []);
+  const named = Array.isArray(data.named_steps) ? data.named_steps : [];
+  // Só pede secret para campos de senha de tools que ainda vão ser geradas
+  const masked = (data.masked_fields || []).filter(f => !names.has(f.tool_name));
+  if (!masked.length) { startToolGeneration(named); return; }
+  askSecrets(masked).then(map => {
+    if (map) { startToolGeneration(named, map); return; }
+    pendingSteps.clear();
+    renderFlow();
+    toast('Geração cancelada: os campos de senha precisam de um secret.', 'warn', 5000);
+  });
 }
 
 // ─── Geração interativa de tools ──────────────────────────────────────────────
 let _reviewCM = null;
 
-async function startToolGeneration(namedSteps) {
+async function startToolGeneration(namedSteps, secretsMap = {}) {
   const names = toolNameSet();
   const newTools = (namedSteps || []).filter(s => s && !names.has(s.tool_name));
   if (newTools.length === 0) {
@@ -1314,7 +1356,7 @@ async function startToolGeneration(namedSteps) {
     resp = await fetch('/api/generate-tools', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ named_steps: namedSteps }),
+      body: JSON.stringify({ named_steps: namedSteps, secrets_map: secretsMap }),
       signal: gen.ctrl.signal,
     });
   } catch (e) {
@@ -2239,6 +2281,7 @@ let _qaCM = null;
 let _qaCurrentFilename = '';
 
 function openQAPanel() {
+  if ($('secretsPanel').classList.contains('open')) closeSecretsPanel();
   const panel = $('qaPanel');
   panel.classList.add('open');
   panel.inert = false;
@@ -2440,6 +2483,198 @@ async function loadQAHistory() {
   }));
 }
 
+// ─── Secrets ──────────────────────────────────────────────────────────────────
+// Senhas e valores sensíveis, como variáveis de ambiente: NOME → valor.
+// As tools chamam secret("NOME"); o valor nunca é exibido nem vai para o código.
+const SECRET_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+let _secretsAsk = null;   // {fields, resolve}
+
+async function fetchSecrets() {
+  return apiJson('/api/secrets');
+}
+
+// Abre o modal e resolve com {masked_id: NOME} ou null se o usuário cancelar
+async function askSecrets(fields) {
+  let existing = [];
+  try { existing = await fetchSecrets(); } catch (e) { toast(`Erro ao listar secrets: ${e.message}`, 'err'); }
+  const names = existing.map(s => s.name);
+  const list = $('secretsAskList');
+  list.textContent = '';
+  for (const f of fields) {
+    const hasExisting = names.length > 0;
+    // 2.1: se já existe um secret com o nome sugerido, ele vem selecionado
+    const useExisting = names.includes(f.suggested_name);
+    const radioName = `secretMode_${f.id}`;
+    const sel = el('select', { 'data-role': 'existing', 'aria-label': 'Secret existente' },
+      names.map(n => el('option', { value: n, text: n, selected: n === f.suggested_name })));
+    const nameInput = el('input', { type: 'text', 'data-role': 'name', value: useExisting ? '' : f.suggested_name,
+      placeholder: 'NOME_DO_SECRET', 'aria-label': 'Nome do novo secret', autocomplete: 'off' });
+    const valueInput = el('input', { type: 'password', 'data-role': 'value', placeholder: 'Valor real (ex.: a senha)',
+      'aria-label': 'Valor do novo secret', autocomplete: 'new-password' });
+    nameInput.addEventListener('input', () => { nameInput.value = nameInput.value.toUpperCase(); });
+    const rExisting = el('input', { type: 'radio', name: radioName, value: 'existing', checked: hasExisting && useExisting, disabled: !hasExisting });
+    const rNew = el('input', { type: 'radio', name: radioName, value: 'new', checked: !(hasExisting && useExisting) });
+    const sync = () => {
+      const isNew = rNew.checked;
+      sel.disabled = isNew || !hasExisting;
+      nameInput.disabled = valueInput.disabled = !isNew;
+    };
+    rExisting.addEventListener('change', sync);
+    rNew.addEventListener('change', sync);
+    const box = el('div', { class: 'secret-ask', dataset: { id: f.id } }, [
+      el('div', { class: 'secret-ask-title' }, [
+        `Campo «${f.target_text || 'senha'}» `,
+        el('small', { text: `(tool ${f.tool_name})` }),
+      ]),
+      el('label', { class: 'opt' }, [rExisting, hasExisting ? 'Usar secret existente' : 'Usar secret existente (nenhum cadastrado)']),
+      sel,
+      el('label', { class: 'opt' }, [rNew, 'Criar novo secret']),
+      nameInput,
+      valueInput,
+    ]);
+    list.appendChild(box);
+    sync();
+  }
+  $('secretsAskOk').disabled = false;
+  openModal('secretsAskModal');
+  const first = list.querySelector('input:not([disabled]), select:not([disabled])');
+  if (first) first.focus();
+  return new Promise(resolve => { _secretsAsk = { fields, resolve }; });
+}
+
+async function confirmSecretsAsk() {
+  if (!_secretsAsk) return;
+  const map = {}, toCreate = [];
+  for (const box of $('secretsAskList').querySelectorAll('.secret-ask')) {
+    const id = box.dataset.id;
+    const mode = box.querySelector('input[type=radio]:checked').value;
+    if (mode === 'existing') {
+      map[id] = box.querySelector('[data-role=existing]').value;
+      continue;
+    }
+    const name = box.querySelector('[data-role=name]').value.trim();
+    const value = box.querySelector('[data-role=value]').value;
+    if (!SECRET_NAME_RE.test(name)) { toast(`Nome de secret inválido: "${name}" — use MAIÚSCULAS, números e _`, 'err'); return; }
+    if (!value) { toast(`Informe o valor do secret ${name}`, 'err'); return; }
+    // Dois campos podem apontar para o mesmo secret novo — cria uma vez só
+    const dup = toCreate.find(t => t.name === name);
+    if (dup && dup.value !== value) { toast(`O secret ${name} foi informado com dois valores diferentes`, 'err'); return; }
+    if (!dup) toCreate.push({ name, value });
+    map[id] = name;
+  }
+  const btn = $('secretsAskOk');
+  btn.disabled = true;
+  try {
+    for (const s of toCreate) await postJson('/api/secrets', s);
+  } catch (e) {
+    btn.disabled = false;
+    toast(`Erro ao salvar secret: ${e.message}`, 'err');
+    return;
+  }
+  const { resolve } = _secretsAsk;
+  _secretsAsk = null;
+  hideModal('secretsAskModal');
+  $('secretsAskList').textContent = '';   // não deixa senha digitada no DOM
+  if (toCreate.length) toast(`Secret(s) criado(s): ${toCreate.map(s => s.name).join(', ')}`, 'ok');
+  if ($('secretsPanel').classList.contains('open')) renderSecretsPanel();
+  resolve(map);
+}
+
+function cancelSecretsAsk() {
+  if (!_secretsAsk) { hideModal('secretsAskModal'); return; }
+  const { resolve } = _secretsAsk;
+  _secretsAsk = null;
+  hideModal('secretsAskModal');
+  $('secretsAskList').textContent = '';
+  resolve(null);
+}
+
+// ── Aba Secrets (painel lateral) ──
+function openSecretsPanel() {
+  if ($('qaPanel').classList.contains('open')) closeQAPanel();
+  const panel = $('secretsPanel');
+  panel.classList.add('open');
+  panel.inert = false;
+  panel.removeAttribute('aria-hidden');
+  renderSecretsPanel();
+}
+
+function closeSecretsPanel() {
+  const panel = $('secretsPanel');
+  panel.classList.remove('open');
+  panel.inert = true;
+  panel.setAttribute('aria-hidden', 'true');
+  $('secretNewValue').value = '';
+}
+
+async function renderSecretsPanel() {
+  const list = $('secretsList');
+  let items;
+  try {
+    items = await fetchSecrets();
+  } catch (e) {
+    list.textContent = '';
+    list.appendChild(el('div', { class: 'qa-status-bar', style: 'color:#fc8181', text: `Erro ao carregar secrets: ${e.message}` }));
+    return;
+  }
+  list.textContent = '';
+  if (!items.length) {
+    list.appendChild(el('div', { class: 'qa-status-bar', text: 'Nenhum secret cadastrado. Eles também são criados ao importar uma gravação com campo de senha.' }));
+    return;
+  }
+  for (const it of items) {
+    const quando = it.updated_at ? new Date(it.updated_at) : null;
+    const meta = [
+      '••••••••',
+      it.used_by && it.used_by.length ? `usado em: ${it.used_by.join(', ')}` : 'não usado por nenhuma tool',
+      quando && !isNaN(quando) ? `atualizado em ${quando.toLocaleString('pt-BR')}` : null,
+    ].filter(Boolean).join(' · ');
+    list.appendChild(el('div', { class: 'secret-row' }, [
+      el('div', { class: 'secret-info' }, [
+        el('div', { class: 'secret-name', text: it.name, title: it.name }),
+        el('div', { class: 'secret-meta', text: meta }),
+      ]),
+      el('button', { type: 'button', class: 'btn btn-outline btn-sm', text: 'Alterar valor', onclick: () => {
+        $('secretNewName').value = it.name;
+        $('secretNewValue').value = '';
+        $('secretNewValue').focus();
+      } }),
+      el('button', { type: 'button', class: 'btn btn-danger btn-sm', text: 'Excluir', onclick: () => deleteSecret(it) }),
+    ]));
+  }
+}
+
+async function saveSecretFromPanel() {
+  const name = $('secretNewName').value.trim().toUpperCase();
+  const value = $('secretNewValue').value;
+  if (!SECRET_NAME_RE.test(name)) { toast('Nome inválido — use MAIÚSCULAS, números e _ (ex.: ERP_SENHA)', 'err'); return; }
+  if (!value) { toast('Informe o valor do secret', 'err'); return; }
+  try {
+    await postJson('/api/secrets', { name, value });
+  } catch (e) {
+    toast(`Erro ao salvar secret: ${e.message}`, 'err');
+    return;
+  }
+  $('secretNewName').value = '';
+  $('secretNewValue').value = '';
+  toast(`Secret ${name} salvo`, 'ok');
+  renderSecretsPanel();
+}
+
+async function deleteSecret(item) {
+  const uso = item.used_by && item.used_by.length
+    ? `\n\nAtenção: usado pelas tools ${item.used_by.join(', ')} — elas vão falhar sem ele.` : '';
+  if (!confirm(`Excluir o secret ${item.name}?${uso}`)) return;
+  try {
+    await apiJson(`/api/secrets/${encodeURIComponent(item.name)}`, { method: 'DELETE' });
+  } catch (e) {
+    toast(`Erro ao excluir: ${e.message}`, 'err');
+    return;
+  }
+  toast(`Secret ${item.name} excluído`, 'ok');
+  renderSecretsPanel();
+}
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let _toastTimer = null;
 
@@ -2453,6 +2688,27 @@ function toast(msg, type = 'ok', ms) {
   _toastTimer = setTimeout(() => { box.className = ''; }, dur);
 }
 </script>
+
+<!-- SECRETS PANEL: senhas e valores sensíveis (como variáveis de ambiente) -->
+<div class="qa-panel" id="secretsPanel" inert aria-hidden="true">
+  <div class="qa-panel-header">
+    <h2 style="color:#fbbf24;">🔑 Secrets</h2>
+    <button class="btn btn-outline btn-sm" onclick="closeSecretsPanel()" style="padding:4px 8px;" title="Fechar (Esc)" aria-label="Fechar">✕</button>
+  </div>
+  <div class="qa-panel-body">
+    <p style="font-size:12px; color:#a0aec0;">Funcionam como variáveis de ambiente: as tools usam <code>secret("NOME")</code> e o valor é lido daqui na hora da execução. Os valores nunca são exibidos.</p>
+    <div class="qa-field">
+      <label for="secretNewName">Nome</label>
+      <input type="text" id="secretNewName" placeholder="ex: ERP_SENHA" autocomplete="off" oninput="this.value=this.value.toUpperCase()" />
+    </div>
+    <div class="qa-field">
+      <label for="secretNewValue">Valor</label>
+      <input type="password" id="secretNewValue" placeholder="valor real" autocomplete="new-password" onkeydown="if(event.key==='Enter')saveSecretFromPanel()" />
+    </div>
+    <button class="btn btn-primary" onclick="saveSecretFromPanel()" style="align-self:flex-start;">Salvar secret</button>
+    <div id="secretsList" style="display:flex; flex-direction:column; gap:8px;"></div>
+  </div>
+</div>
 
 <!-- QA PANEL: Gerador de Testes (fechado = inert/visibility:hidden, fora da ordem de foco) -->
 <div class="qa-panel" id="qaPanel" inert aria-hidden="true">

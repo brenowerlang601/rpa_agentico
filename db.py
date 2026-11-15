@@ -95,6 +95,12 @@ def init_db() -> None:
         finalizado_em TIMESTAMPTZ
     );
 
+    CREATE TABLE IF NOT EXISTS secrets (
+        name        TEXT PRIMARY KEY,
+        value       TEXT NOT NULL,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS qa_generated_tests (
         id            SERIAL PRIMARY KEY,
         repo_url      TEXT NOT NULL,
@@ -333,6 +339,73 @@ def get_qa_tests(limit: int = 100) -> list[dict]:
     except Exception as e:
         logger.error(f"[DB ERROR] get_qa_tests falhou: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Secrets CRUD (valores sensíveis usados pelas tools via secret("NOME"))
+# ---------------------------------------------------------------------------
+
+def upsert_secret(name: str, value: str) -> None:
+    sql = """
+    INSERT INTO secrets (name, value, updated_at) VALUES (%s, %s, NOW())
+    ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+    """
+    _write(sql, (name, value), f"upsert_secret('{name}')")
+
+
+def delete_secret(name: str) -> bool:
+    """Remove o secret. Levanta DBError se o banco falhar."""
+    if not db_enabled():
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM secrets WHERE name = %s", (name,))
+                return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"[DB ERROR] delete_secret('{name}') falhou: {e}")
+        raise DBError(f"Erro no banco de dados (delete_secret): {e}") from e
+
+
+def list_secrets() -> list[dict]:
+    """Nomes e data de atualização — nunca os valores."""
+    if not db_enabled():
+        return []
+    try:
+        with _get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT name, updated_at FROM secrets ORDER BY name")
+                return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"[DB ERROR] list_secrets falhou: {e}")
+        return []
+
+
+def get_secret_value(name: str) -> str | None:
+    if not db_enabled():
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM secrets WHERE name = %s", (name,))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Exception as e:
+        logger.error(f"[DB ERROR] get_secret_value('{name}') falhou: {e}")
+        return None
+
+
+def all_secret_values() -> dict[str, str]:
+    if not db_enabled():
+        return {}
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT name, value FROM secrets")
+                return {n: v for n, v in cur.fetchall()}
+    except Exception as e:
+        logger.error(f"[DB ERROR] all_secret_values falhou: {e}")
+        return {}
 
 
 # ---------------------------------------------------------------------------

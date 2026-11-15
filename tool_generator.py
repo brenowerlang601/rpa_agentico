@@ -34,23 +34,35 @@ Você é um especialista em automação web com Playwright (Python async).
 Gere uma função Python async chamada `{func_name}` que executa exatamente \
 a sequência de ações abaixo — SEM pular, reordenar ou omitir nenhuma delas.
 
+Funções de apoio JÁ IMPORTADAS no arquivo (módulo rpa_runtime) — use-as, NÃO as defina:
+- `await localizar(page, xpath=..., css=..., texto=[...], timeout=...)` → Locator de UM elemento visível.
+  Ela escolhe entre os seletores gravados o que é único e espera o elemento aparecer.
+- `await login_necessario(page, xpath=..., css=..., texto=[...], timeout=5000)` → True se a tela de login está presente.
+- `await confirmar_login(page, xpath=..., css=..., texto=[...], timeout=15000)` → True se a tela de login sumiu.
+- `secret("NOME")` → valor de um secret (senha). NUNCA escreva senhas no código.
+
 Regras obrigatórias:
 - Assinatura: `async def {func_name}(page) -> bool:`
 - Cada ação deve estar dentro de um bloco `try/except` individual
 - Em caso de erro em uma ação, adicione à lista `errors: list[tuple[str, str]]` e continue
 - Ao final: retorne `True` se `errors` estiver vazio, `False` caso contrário
-- Imprima `[OK] {func_name}` ou `[FAIL] {func_name}: N erro(s)` com detalhes
-- Conecte ao browser via CDP já estabelecida — `page` já está pronto, não crie browser
-- Para `navigation`: `await page.goto(url)` + `await page.wait_for_load_state('networkidle')`
-- Para `fill`: `await locator.wait_for(state='visible', timeout=10000)` + clique no locator + `await locator.fill(valor)` — use cssSelector se disponível, senão xpath
-- Para `click`: `await locator.wait_for(state='visible', timeout=10000)` + `await locator.click()` + `await page.wait_for_timeout(500)`
-- Para `key_press` com count=1: `await page.keyboard.press(key)` + `await page.wait_for_timeout(150)`
-- Para `key_press` com count>1: `for _ in range(count): await page.keyboard.press(key); await page.wait_for_timeout(150)`
-- Para xpath que começa sem `//`: adicione `//` no início
-- Para cssSelector: use diretamente como string no locator
+- Imprima `[OK] {func_name}` ou `[FAIL] {func_name}: N erro(s)` e, para cada erro, uma linha `  - <ação>: <erro>`
+- `page` já está pronto (conectado via CDP) — não crie browser
+- Para localizar elementos use SEMPRE `localizar(...)` — nunca `page.locator(...)` direto. Passe:
+  `xpath` = campo "xpath" da ação (copie exatamente, sem acrescentar `//`), `css` = "css_selector",
+  `texto` = lista com "element_text" e "target_text" que não estiverem vazios,
+  `timeout` = campo "timeout_ms" da ação (é o tempo que o elemento levou para aparecer na gravação)
+- `navigation`: `await page.goto(url)` + `await page.wait_for_load_state('networkidle')`
+- `fill`: `campo = await localizar(...)` + `await campo.click()` + `await campo.fill(valor)`
+- `fill` com campo "secret": `await campo.fill(secret("<valor do campo secret>"))` — nunca use "value"
+- `click`: `campo = await localizar(...)` + `await campo.click()` + `await page.wait_for_timeout(500)`
+- `key_press` com count=1: `await page.keyboard.press(key)` + `await page.wait_for_timeout(150)`
+- `key_press` com count>1: `for _ in range(count): await page.keyboard.press(key); await page.wait_for_timeout(150)`
 - NÃO inclua blocos markdown (```), apenas código Python puro
 - NÃO inclua imports — a função será importada em um arquivo que já tem os imports
 - Adicione um comentário inline em cada ação identificando o campo/elemento
+
+{login_rule}
 
 {url_rule}
 
@@ -59,7 +71,6 @@ Ações a executar (JSON com TODOS os passos — nenhum pode ser omitido):
 
 Lembre: você deve gerar exatamente {n_actions} blocos try/except, um por ação.
 """
-
 
 # Só faz sentido exigir mudança de URL quando a gravação mostra que a tela mudou
 # durante esta etapa. Um grupo que só preenche campos, o último passo do fluxo ou um
@@ -74,28 +85,72 @@ _URL_RULE_EXPECT = """Validação de navegação (OBRIGATÓRIO — esta etapa de
 _URL_RULE_NONE = """Validação de navegação:
 - Esta etapa NÃO precisa mudar de tela. NÃO compare a URL inicial com a final e NÃO adicione erro de URL inalterada."""
 
+# Etapas de login: a sessão pode já estar aberta (cookies do browser) — nesse caso o login
+# é pulado; quando é feito, confirma que a tela de login sumiu.
+_LOGIN_RULE = """Validação de login (OBRIGATÓRIO — esta etapa faz login):
+- Execute normalmente as ações ANTERIORES ao primeiro campo de login (ex.: navigation).
+- Antes do primeiro campo de login, verifique se a tela de login está presente:
+  `if not await login_necessario(page, xpath={xpath!r}, css={css!r}, texto={texto!r}, timeout=5000):`
+  `    print("[OK] {func_name}: sessão já autenticada — login ignorado")`
+  `    return True`
+- Depois da ação que envia o login (a última ação), confirme o login:
+  `if not await confirmar_login(page, xpath={xpath!r}, css={css!r}, texto={texto!r}, timeout=15000):`
+  `    errors.append(('login', 'a tela de login continua visível — usuário ou senha incorretos?'))`"""
+
 
 def expects_url_change(named_steps: list[dict], index: int) -> bool:
     """
     Indica se a etapa `index` deve terminar em outra tela.
     Os grupos são separados por mudança de URL, então a troca de tela acontece dentro da
-    etapa atual — exceto na última etapa e quando a próxima começa com uma navegação explícita
-    (nesse caso quem muda a URL é a própria próxima etapa).
+    etapa atual — exceto na última etapa, quando a próxima começa com uma navegação explícita
+    (nesse caso quem muda a URL é a própria próxima etapa) e quando a próxima etapa continua
+    na mesma URL (sequências longas quebradas em várias tools numa SPA).
     """
+    from json_processor import _screen_key
+
     if index >= len(named_steps) - 1:
         return False
+    actions = named_steps[index].get("actions") or []
     next_actions = named_steps[index + 1].get("actions") or []
-    if next_actions and next_actions[0].get("type") == "navigation":
+    if not actions or not next_actions:
         return False
-    return True
+    if next_actions[0].get("type") == "navigation":
+        return False
+    return _screen_key(actions[-1].get("url", "")) != _screen_key(next_actions[0].get("url", ""))
+
+
+def _prompt_actions(actions: list[dict]) -> list[dict]:
+    """Ações como vão para o LLM: sem campos internos e sem valores mascarados."""
+    out = []
+    for a in actions:
+        a = {k: v for k, v in a.items() if k not in ("timestamp", "masked", "masked_id") and v not in ("", None)}
+        if a.get("secret"):
+            a.pop("value", None)
+        out.append(a)
+    return out
 
 
 def _build_prompt(func_name: str, actions: list[dict], expect_url_change: bool = False) -> str:
-    actions_json = json.dumps(actions, indent=2, ensure_ascii=False)
+    from json_processor import login_field
+
+    if any(a.get("masked") and not a.get("secret") for a in actions):
+        raise ValueError(f"'{func_name}' tem campo de senha sem secret definido")
+
+    campo = login_field(actions)
+    login_rule = ""
+    if campo:
+        login_rule = _LOGIN_RULE.format(
+            func_name=func_name,
+            xpath=campo.get("xpath") or None,
+            css=campo.get("css_selector") or None,
+            texto=[campo["target_text"]] if campo.get("target_text") else None,
+        )
+    actions_json = json.dumps(_prompt_actions(actions), indent=2, ensure_ascii=False)
     return _PROMPT.format(
         func_name=func_name,
         actions_json=actions_json,
         n_actions=len(actions),
+        login_rule=login_rule,
         url_rule=_URL_RULE_EXPECT if expect_url_change else _URL_RULE_NONE,
     )
 
@@ -128,7 +183,10 @@ def _save_tool(func_name: str, func_code: str, fingerprint: str = "") -> Path:
     from db import upsert_tool
 
     fp_comment = f"# actions_fp: {fingerprint}\n" if fingerprint else ""
-    header = f"{fp_comment}from playwright.async_api import Page\n\n"
+    header = (
+        f"{fp_comment}from playwright.async_api import Page\n"
+        "from rpa_runtime import confirmar_login, localizar, login_necessario, secret\n\n"
+    )
     full_code = header + func_code
     tool_path = TOOLS_DIR / f"{func_name}.py"
     upsert_tool(func_name, full_code, fingerprint)

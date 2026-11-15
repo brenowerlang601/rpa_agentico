@@ -113,11 +113,13 @@ Cada arquivo em `tools/` segue a estrutura:
 ```python
 # actions_fp: <hash_md5_das_acoes>
 from playwright.async_api import Page
+from rpa_runtime import confirmar_login, localizar, login_necessario, secret
 
 async def nome_da_tool(page) -> bool:
     errors = []
     try:
-        # ação
+        campo = await localizar(page, xpath="...", css="...", texto=["Senha"], timeout=10000)
+        await campo.fill(secret("ERP_SENHA"))
     except Exception as e:
         errors.append(("ação", str(e)))
     
@@ -129,6 +131,16 @@ async def nome_da_tool(page) -> bool:
 ```
 
 - `page` sempre vem como parâmetro — nunca cria browser
+- `localizar` escolhe, entre xpath, css e textos gravados, o seletor que aponta para um único elemento visível, e espera o tempo que o elemento levou para aparecer na gravação
+- Tools de login pulam o login quando a sessão já está aberta e confirmam o login quando ele é feito
+
+## Secrets
+
+A extensão grava campos de senha como `********`. Ao importar uma gravação com esses campos,
+a interface pede, para cada um, um secret existente ou um novo (nome + valor). O código gerado
+chama `secret("NOME")` e o valor real fica na aba **🔑 Secrets** — nunca no código e nunca no
+prompt do LLM. Na execução pela interface os secrets são injetados como variáveis de ambiente;
+ao rodar `python tests/x.py` direto, são lidos do banco (ou do `secrets.json` local, fora do git).
 - Retorna `True` (sucesso) ou `False` (falhou)
 - Nomes em snake_case português
 

@@ -30,11 +30,14 @@ from db import init_db, inserir_execucao as db_inserir_execucao
 from db import rename_tool as db_rename_tool
 from db import restore_from_db, upsert_tool as db_upsert_tool
 from db import upsert_workflow as db_upsert_workflow
+import secrets_store
 from json_processor import (
     TESTS_DIR,
     TOOLS_DIR,
     _read_tool_fingerprint,
     _slug,
+    annotate_masked,
+    apply_secrets,
     build_script,
     group_steps,
     is_valid_tool_name,
@@ -190,6 +193,8 @@ def _workflow_from_json(dest: Path):
         "workflow_slug": _slug(workflow_name),
         "steps": steps,
         "named_steps": [{"tool_name": s["tool_name"], "actions": s["actions"]} for s in named],
+        # Campos de senha gravados como ******** — a interface pede um secret para cada um
+        "masked_fields": annotate_masked(named),
         "tools": _all_tools(),
     }, None
 
@@ -549,6 +554,8 @@ def _run_steps(workflow_name: str, steps: list, headless: bool = True,
         tmp_path = Path(tf.name)
 
     env = os.environ.copy()
+    # Secrets da aba Secrets viram variáveis de ambiente — secret("NOME") lê daqui
+    env.update(secrets_store.all_values())
     env["PYTHONUNBUFFERED"] = "1"
     try:
         # start_new_session: o processo vira líder de um grupo próprio, para que pausar/cancelar
@@ -759,6 +766,7 @@ def api_generate_tools():
     data = request.json or {}
     filename = data.get("filename", "")
     named_steps = data.get("named_steps")  # [{tool_name, actions}]
+    secrets_map = data.get("secrets_map") or {}  # {masked_id: NOME_DO_SECRET}
 
     # Suporte a passar filename OU named_steps diretamente
     if filename:
@@ -775,6 +783,16 @@ def api_generate_tools():
 
     if not named_steps or not isinstance(named_steps, list):
         return _error("Nenhum step para processar")
+
+    # Campos de senha: o valor mascarado é trocado pelo secret escolhido na interface
+    known = {x["name"] for x in secrets_store.list_secrets()}
+    unknown = sorted(set(secrets_map.values()) - known)
+    if unknown:
+        return _error(f"Secret não cadastrado: {', '.join(unknown)}")
+    try:
+        apply_secrets(named_steps, secrets_map)
+    except ValueError as e:
+        return _error(str(e))
 
     gen_id = uuid.uuid4().hex[:12]
     state = {"event": threading.Event(), "response": None, "awaiting": False}
@@ -878,6 +896,54 @@ def api_generate_tools():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/secrets", methods=["GET"])
+def api_secrets_list():
+    """Lista os secrets (só nomes, data e tools que usam — nunca os valores)."""
+    usage: dict[str, list[str]] = {}
+    for p in TOOLS_DIR.glob("*.py"):
+        for name in re.findall(r"""secret\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)""", p.read_text(encoding="utf-8")):
+            usage.setdefault(name, []).append(p.stem)
+    items = []
+    for item in secrets_store.list_secrets():
+        updated = item.get("updated_at")
+        items.append({
+            "name": item["name"],
+            "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
+            "used_by": sorted(usage.get(item["name"], [])),
+        })
+    return jsonify(items)
+
+
+@app.route("/api/secrets", methods=["POST"])
+def api_secrets_save():
+    """Cria ou atualiza um secret: {name, value}."""
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    value = data.get("value")
+    if not isinstance(value, str) or value == "":
+        return _error("Informe o valor do secret")
+    try:
+        secrets_store.set_secret(name, value)
+    except ValueError as e:
+        return _error(str(e))
+    except DBError as e:
+        return _error(str(e), 500)
+    return jsonify({"ok": True, "name": name})
+
+
+@app.route("/api/secrets/<name>", methods=["DELETE"])
+def api_secrets_delete(name: str):
+    if not secrets_store.is_valid_name(name):
+        return _error("Nome de secret inválido")
+    try:
+        removed = secrets_store.delete_secret(name)
+    except DBError as e:
+        return _error(str(e), 500)
+    if not removed:
+        return _error("Secret não encontrado", 404)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/review-response", methods=["POST"])

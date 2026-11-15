@@ -17,9 +17,12 @@
 Toda tool em `tools/` deve seguir:
 1. Primeira linha: `# actions_fp: <hash_md5>` (fingerprint das ações)
 2. Segunda linha: `from playwright.async_api import Page`
-3. Função: `async def nome_da_tool(page) -> bool:`
-4. Retorno: `True` (sem erros) ou `False` (com erros)
-5. Nomes em snake_case português
+3. Terceira linha: `from rpa_runtime import confirmar_login, localizar, login_necessario, secret`
+4. Função: `async def nome_da_tool(page) -> bool:`
+5. Retorno: `True` (sem erros) ou `False` (com erros)
+6. Nomes em snake_case português
+7. Elementos via `localizar(...)`; senhas via `secret("NOME")` (nunca o valor no código)
+8. Tools de login pulam o login quando a sessão já está aberta (`login_necessario`)
 
 ## Versionamento de tools
 
