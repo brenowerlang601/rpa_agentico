@@ -11,3 +11,16 @@ dependencies = [
     "playwright>=1.58.0",
     "psycopg2-binary>=2.9",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+# Testes unitários ficam em testes_unitarios/. A pasta tests/ é de scripts RPA do ERP
+# e NUNCA pode ser coletada pelo pytest (rodar um script de lá abre o ERP de verdade).
+[tool.pytest.ini_options]
+testpaths = ["testes_unitarios"]
+norecursedirs = ["tests", "tools", "json_rpa", "templates", ".venv", ".git", "__pycache__"]
+pythonpath = ["."]
+addopts = "-q"

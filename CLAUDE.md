@@ -12,6 +12,7 @@ tools/          → Componentes/etapas reutilizáveis do script RPA (ex: fazer_l
                   ATENÇÃO: NÃO são ferramentas de IA — são funções Playwright async
 tests/          → Scripts de automação gerados para o ERP (ex: pedido_venda.py)
                   ATENÇÃO: NÃO são testes unitários — são os scripts finais que rodam no ERP
+testes_unitarios/ → Testes unitários (pytest) do código do sistema — ver "TDD" abaixo
 templates/      → HTML do frontend (index.html — interface visual Flask)
 ```
 
@@ -57,6 +58,17 @@ templates/      → HTML do frontend (index.html — interface visual Flask)
 - Tools geradas via LLM **não são salvas automaticamente** — o usuário revisa e aprova/rejeita/pede revisão
 - Fluxo via SSE: `__GENERATING__` → `__REVIEW__` → aguarda resposta → `__APPROVED__` ou `__REJECTED__`
 - Tool rejeitada é deletada do disco imediatamente
+
+## TDD (obrigatório)
+
+Toda função nova, correção de bug ou mudança de comportamento começa por um teste que falha
+em `testes_unitarios/`: escrever o teste → **ver falhar pelo motivo certo** → implementar o
+mínimo → ver a suíte inteira passar. Bug → primeiro o teste que reproduz. Detalhes, comandos
+e exceções (como as tools geradas): [.claude/rules/tdd.md](.claude/rules/tdd.md).
+
+```bash
+uv run pytest   # só coleta testes_unitarios/ — nunca a pasta tests/
+```
 
 ## Execução
 

@@ -21,3 +21,5 @@ O browser deve estar aberto com CDP em `http://localhost:9222`.
 - NÃO tratar erros de automação como falhas de teste de software
 - NÃO criar fixtures, mocks ou helpers de teste — os scripts são diretos ao ponto
 - Arquivos com prefixo `rpa_run_` são temporários gerados pelo servidor — ignorar
+
+Testes unitários do código do sistema ficam em `testes_unitarios/` (ver [tdd.md](tdd.md)).
