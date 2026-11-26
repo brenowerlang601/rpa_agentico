@@ -101,6 +101,14 @@ def init_db() -> None:
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS gravacoes (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE,
+        conteudo    JSONB NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS qa_generated_tests (
         id            SERIAL PRIMARY KEY,
         repo_url      TEXT NOT NULL,
@@ -406,6 +414,52 @@ def all_secret_values() -> dict[str, str]:
     except Exception as e:
         logger.error(f"[DB ERROR] all_secret_values falhou: {e}")
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Gravações CRUD (JSONs gravados pela extensão)
+# ---------------------------------------------------------------------------
+
+def upsert_gravacao(name: str, conteudo: dict) -> None:
+    """INSERT ou UPDATE de uma gravação. Levanta DBError se o banco falhar."""
+    import json
+    sql = """
+    INSERT INTO gravacoes (name, conteudo, updated_at) VALUES (%s, %s, NOW())
+    ON CONFLICT (name) DO UPDATE SET conteudo = EXCLUDED.conteudo, updated_at = NOW();
+    """
+    _write(sql, (name, json.dumps(conteudo, ensure_ascii=False)), f"upsert_gravacao('{name}')")
+
+
+def get_gravacao(name: str) -> dict | None:
+    """
+    Conteúdo da gravação, ou None se não existir.
+    Levanta DBError se o banco falhar — senão uma queda do banco apareceria como "não encontrado".
+    """
+    if not db_enabled():
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT conteudo FROM gravacoes WHERE name = %s", (name,))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Exception as e:
+        logger.error(f"[DB ERROR] get_gravacao('{name}') falhou: {e}")
+        raise DBError(f"Erro no banco de dados (get_gravacao): {e}") from e
+
+
+def list_gravacoes() -> list[str]:
+    """Nomes das gravações (ex.: 'pedido_venda.json'), em ordem alfabética."""
+    if not db_enabled():
+        return []
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT name FROM gravacoes ORDER BY name")
+                return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"[DB ERROR] list_gravacoes falhou: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------

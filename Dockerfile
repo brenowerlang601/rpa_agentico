@@ -20,7 +20,7 @@ RUN uv sync --frozen --no-dev
 RUN uv run playwright install chromium --with-deps
 
 # Copia o código da aplicação
-COPY app.py db.py json_processor.py tool_generator.py qa_code_analyzer.py qa_test_generator.py rpa_runtime.py secrets_store.py ./
+COPY app.py db.py gravacoes_store.py json_processor.py tool_generator.py qa_code_analyzer.py qa_test_generator.py rpa_runtime.py secrets_store.py ./
 COPY templates/ templates/
 
 # Cria pastas necessárias (serão populadas pelo restore_from_db no startup)

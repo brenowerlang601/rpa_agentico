@@ -30,6 +30,7 @@ from db import init_db, inserir_execucao as db_inserir_execucao
 from db import rename_tool as db_rename_tool
 from db import restore_from_db, upsert_tool as db_upsert_tool
 from db import upsert_workflow as db_upsert_workflow
+import gravacoes_store
 import secrets_store
 from json_processor import (
     TESTS_DIR,
@@ -53,9 +54,6 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-JSON_RPA_DIR = Path("json_rpa")
-JSON_RPA_DIR.mkdir(exist_ok=True)
-
 # Startup: garante que banco e disco estão sincronizados.
 # Roda tanto via `python app.py` quanto via gunicorn/uwsgi no container.
 init_db()
@@ -133,18 +131,6 @@ def _workflows_using(tool_name: str) -> list[Path]:
     ]
 
 
-def _safe_json_path(filename: str) -> Path | None:
-    """
-    Caminho do JSON dentro de json_rpa/, ou None se o nome for inválido.
-    Bloqueia ../, barras e caminhos absolutos (o nome vem do usuário).
-    """
-    if not isinstance(filename, str) or not filename.endswith(".json"):
-        return None
-    if filename != Path(filename).name or filename.startswith(".") or "\\" in filename:
-        return None
-    return JSON_RPA_DIR / filename
-
-
 def _validate_steps(steps) -> str | None:
     """Retorna mensagem de erro se a lista de steps for inválida, ou None."""
     if not isinstance(steps, list) or not steps:
@@ -176,15 +162,16 @@ def _preview_script(workflow_name: str, steps: list[str], headless: bool | None 
     )
 
 
-def _workflow_from_json(dest: Path):
-    """Lê um JSON gravado e devolve (payload, None) ou (None, mensagem de erro)."""
-    try:
-        data = json.loads(dest.read_text(encoding="utf-8"))
-    except (ValueError, UnicodeDecodeError) as e:
-        return None, f"JSON inválido: {e}"
+def _gravacao_invalida(data) -> str | None:
+    """Mensagem de erro se o conteúdo não for uma gravação no formato esperado, ou None."""
     if not isinstance(data, dict) or not isinstance(data.get("steps", []), list):
-        return None, "JSON fora do formato esperado (precisa ter a lista 'steps')"
-    workflow_name = data.get("name") or dest.stem
+        return "JSON fora do formato esperado (precisa ter a lista 'steps')"
+    return None
+
+
+def _workflow_from_json(filename: str, data: dict) -> dict:
+    """Monta o workflow (steps agrupados e nomeados) a partir de uma gravação já validada."""
+    workflow_name = data.get("name") or Path(filename).stem
     grouped = group_steps(data.get("steps", []))
     named = name_steps(grouped)
     steps = resolve_tool_names(named, TOOLS_DIR, _existing_tools())
@@ -196,7 +183,7 @@ def _workflow_from_json(dest: Path):
         # Campos de senha gravados como ******** — a interface pede um secret para cada um
         "masked_fields": annotate_masked(named),
         "tools": _all_tools(),
-    }, None
+    }
 
 
 def _signal_run(proc: subprocess.Popen, sig: int) -> None:
@@ -282,25 +269,28 @@ def api_run_workflow_by_id(workflow_id: int):
 
 @app.route("/api/json-files")
 def api_json_files():
-    """Retorna todos os arquivos JSON disponíveis na pasta json_rpa/."""
-    files = []
-    for p in sorted(JSON_RPA_DIR.glob("*.json")):
-        files.append({"name": p.name, "stem": p.stem})
-    return jsonify(files)
+    """Retorna todas as gravações disponíveis (banco ou pasta json_rpa/)."""
+    return jsonify([{"name": n, "stem": Path(n).stem} for n in gravacoes_store.listar()])
 
 
 @app.route("/api/load-json", methods=["POST"])
 def api_load_json():
-    """Carrega e processa um JSON existente da pasta json_rpa/."""
-    dest = _safe_json_path((request.json or {}).get("filename", ""))
-    if dest is None:
+    """Carrega e processa uma gravação já importada."""
+    filename = (request.json or {}).get("filename", "")
+    if not gravacoes_store.nome_valido(filename):
         return _error("Nome de arquivo inválido")
-    if not dest.exists():
+    try:
+        data = gravacoes_store.carregar(filename)
+    except DBError as e:
+        return _error(str(e), 500)
+    except (ValueError, UnicodeDecodeError) as e:
+        return _error(f"JSON inválido: {e}")
+    if data is None:
         return _error("Arquivo não encontrado", 404)
-    payload, err = _workflow_from_json(dest)
+    err = _gravacao_invalida(data)
     if err:
         return _error(err)
-    return jsonify(payload)
+    return jsonify(_workflow_from_json(filename, data))
 
 
 @app.route("/api/tool/<name>")
@@ -443,28 +433,28 @@ def api_tools_check():
 
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
-    """Recebe upload de JSON, valida, salva em json_rpa/ e processa."""
+    """Recebe upload de JSON, valida, salva (banco ou json_rpa/) e processa."""
     if "file" not in request.files:
         return _error("Nenhum arquivo enviado")
     f = request.files["file"]
-    dest = _safe_json_path(f.filename or "")
-    if dest is None:
+    filename = f.filename or ""
+    if not gravacoes_store.nome_valido(filename):
         return _error("Nome de arquivo inválido — envie um arquivo .json")
 
-    # Valida antes de gravar: um JSON quebrado não pode ficar salvo na pasta
-    raw = f.read()
+    # Valida antes de gravar: um JSON quebrado não pode ficar salvo
     try:
-        data = json.loads(raw.decode("utf-8"))
+        data = json.loads(f.read().decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
         return _error(f"JSON inválido: {e}")
-    if not isinstance(data, dict) or not isinstance(data.get("steps", []), list):
-        return _error("JSON fora do formato esperado (precisa ter a lista 'steps')")
-
-    dest.write_bytes(raw)
-    payload, err = _workflow_from_json(dest)
+    err = _gravacao_invalida(data)
     if err:
         return _error(err)
-    return jsonify(payload)
+
+    try:
+        gravacoes_store.salvar(filename, data)
+    except DBError as e:
+        return _error(str(e), 500)
+    return jsonify(_workflow_from_json(filename, data))
 
 
 @app.route("/api/preview", methods=["POST"])
@@ -770,15 +760,19 @@ def api_generate_tools():
 
     # Suporte a passar filename OU named_steps diretamente
     if filename:
-        dest = _safe_json_path(filename)
-        if dest is None:
+        if not gravacoes_store.nome_valido(filename):
             return _error("Nome de arquivo inválido")
-        if not dest.exists():
-            return _error("Arquivo não encontrado", 404)
         try:
-            raw = json.loads(dest.read_text(encoding="utf-8"))
-        except ValueError as e:
+            raw = gravacoes_store.carregar(filename)
+        except DBError as e:
+            return _error(str(e), 500)
+        except (ValueError, UnicodeDecodeError) as e:
             return _error(f"JSON inválido: {e}")
+        if raw is None:
+            return _error("Arquivo não encontrado", 404)
+        err = _gravacao_invalida(raw)
+        if err:
+            return _error(err)
         named_steps = name_steps(group_steps(raw.get("steps", [])))
 
     if not named_steps or not isinstance(named_steps, list):

@@ -22,6 +22,7 @@ templates/      → HTML do frontend (index.html — interface visual Flask)
 - [tool_generator.py](tool_generator.py) — Gera código Playwright via LLM (GPT-4o via OpenAI), salva em `tools/`
 - [rpa_runtime.py](rpa_runtime.py) — Funções usadas pelas tools: `localizar` (escolhe o seletor único e espera o tempo gravado), `login_necessario`/`confirmar_login`, `secret`
 - [secrets_store.py](secrets_store.py) — Secrets (senhas) usados pelas tools: tabela `secrets` no banco ou `secrets.json` local
+- [gravacoes_store.py](gravacoes_store.py) — JSONs gravados pela extensão: tabela `gravacoes` no banco ou pasta `json_rpa/` local
 - [templates/index.html](templates/index.html) — Frontend completo: canvas drag-and-drop, editor inline, preview do script, terminal de execução
 
 ## Convenções críticas
