@@ -609,3 +609,17 @@ def test_tool_aprovada_vai_para_o_banco_e_rejeitada_nao(pg, client, llm):
     tools = {t["name"]: t for t in db.get_all_tools()}
     assert set(tools) == {"vai_banco"}
     assert db.get_tool_fingerprint("vai_banco") == _actions_fingerprint(_acoes(xpath="a"))
+
+
+def test_banco_fora_do_ar_ao_conferir_os_secrets_responde_500_e_nao_secret_nao_cadastrado(
+        client, monkeypatch, llm):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:s@127.0.0.1:1/rpa_teste")
+
+    r = client.post("/api/generate-tools",
+                    json={"named_steps": [_step("ok")], "secrets_map": {"g0a0": "ERP_SENHA"}})
+
+    assert r.status_code == 500
+    assert "banco" in r.json["error"].lower()
+    assert "não cadastrado" not in r.json["error"]
+    assert llm.prompts == []
+    assert app_mod._reserved_tool_names == set()

@@ -112,6 +112,26 @@ def test_salvar_secret_no_modo_banco_grava_no_banco_e_nao_no_arquivo(pg, client,
     assert not (tmp_path / "secrets.json").exists()
 
 
+def test_lista_com_banco_inacessivel_da_500_em_vez_de_aba_vazia(client, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", BANCO_FORA)
+
+    r = client.get("/api/secrets")
+
+    assert r.status_code == 500
+    assert "banco" in r.json["error"].lower()
+
+
+def test_salvar_secret_com_secrets_json_corrompido_e_recusado_e_preserva_o_arquivo(client, tmp_path):
+    corrompido = '{"ERP_SENHA": {"value": "s3nh@", "updated_at": "x"},'
+    (tmp_path / "secrets.json").write_text(corrompido, encoding="utf-8")
+
+    r = client.post("/api/secrets", json={"name": "OUTRO", "value": "x"})
+
+    assert r.status_code == 400
+    assert "secrets.json" in r.json["error"]
+    assert (tmp_path / "secrets.json").read_text(encoding="utf-8") == corrompido
+
+
 def test_salvar_secret_com_banco_inacessivel_da_500(client, monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", BANCO_FORA)
 

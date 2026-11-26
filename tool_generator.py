@@ -12,6 +12,7 @@ Nenhuma tool é salva sem aprovação do usuário: na interface web a revisão �
 pelo modal (app.py /api/generate-tools); na linha de comando, por review_in_terminal().
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -163,6 +164,10 @@ def _call_llm(prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     code = response.choices[0].message.content.strip()
+    # Texto explicativo antes da cerca ("Aqui está a função:\n```python") não é código
+    fence = code.find("\n```")
+    if not code.startswith("```") and fence != -1:
+        code = code[fence + 1:]
     # Remove markdown fences caso o LLM inclua
     if code.startswith("```"):
         lines = code.split("\n")
@@ -258,4 +263,8 @@ async def generate_tool_from_agent_result(task_name: str, result) -> Path | None
     code = review_in_terminal(task_name, prompt)
     if code is None:
         return None
-    return _save_tool(task_name, code)
+    # _actions_fingerprint ignora o campo "data" (onde estão as ações do agente) e daria o
+    # mesmo hash para execuções diferentes — o fingerprint sai das ações brutas
+    raw = json.dumps(raw_actions, default=str, sort_keys=True)
+    fingerprint = hashlib.md5(raw.encode()).hexdigest()[:12]
+    return _save_tool(task_name, code, fingerprint=fingerprint)

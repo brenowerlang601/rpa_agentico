@@ -99,9 +99,6 @@ def test_get_connection_usa_porta_5432_quando_url_nao_tem_porta(monkeypatch, con
     assert connect_falso["port"] == 5432
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: senha com caractere especial codificado na URL (%40 = @) chega ao psycopg2 ainda "
-    "codificada — urlparse não decodifica, e a conexão falha por senha errada"))
 def test_get_connection_decodifica_senha_com_caractere_especial(monkeypatch, connect_falso):
     monkeypatch.setenv("DATABASE_URL", "postgresql://fulano:p%40ss%2Fw@db.exemplo.local/rpa_db")
 
@@ -110,9 +107,6 @@ def test_get_connection_decodifica_senha_com_caractere_especial(monkeypatch, con
     assert connect_falso["password"] == "p@ss/w"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: parâmetros da URL (ex.: ?sslmode=require, exigido por Postgres gerenciado) são "
-    "descartados — _get_connection só repassa host/porta/banco/usuário/senha"))
 def test_get_connection_respeita_sslmode_da_url(monkeypatch, connect_falso):
     monkeypatch.setenv("DATABASE_URL", "postgresql://fulano:segredo@db.exemplo.local/rpa_db?sslmode=require")
 
@@ -254,18 +248,11 @@ def test_banco_fora_do_ar_leituras_devolvem_vazio_e_registram_erro(leitura, vazi
     assert "[DB ERROR]" in caplog.text
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: com o banco fora do ar list_gravacoes devolve [] e /api/json-files responde 200 com "
-    "lista vazia — a queda aparece como 'nenhuma gravação' (get_gravacao levanta DBError "
-    "justamente para evitar isso)"))
 def test_list_gravacoes_com_banco_fora_do_ar_levanta_dberror(banco_fora_do_ar):
     with pytest.raises(DBError):
         db.list_gravacoes()
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: com o banco fora do ar list_secrets devolve [] — /api/secrets mostra a aba vazia e "
-    "/api/generate-tools recusa com 'Secret não cadastrado' em vez de erro de banco"))
 def test_list_secrets_com_banco_fora_do_ar_levanta_dberror(banco_fora_do_ar):
     with pytest.raises(DBError):
         db.list_secrets()

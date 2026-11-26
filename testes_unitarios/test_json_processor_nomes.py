@@ -71,7 +71,6 @@ def test_nome_de_tool_invalido_e_recusado(nome_tool):
     assert not jp.is_valid_tool_name(nome_tool)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: regex com $ aceita quebra de linha no fim ('nome\\n'); usar \\Z ou fullmatch")
 def test_nome_de_tool_com_quebra_de_linha_no_fim_e_recusado():
     """'nome\\n' passa e vira `from tools.nome\\n import nome\\n` — script que nem compila."""
     assert not jp.is_valid_tool_name("nome\n")

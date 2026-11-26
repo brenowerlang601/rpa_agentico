@@ -72,3 +72,12 @@ def test_banco_fora_do_ar_responde_500_em_vez_de_nao_encontrado(client, monkeypa
     assert abrir.status_code == 500
     assert importar.status_code == 500
     assert "banco" in abrir.json["error"].lower()
+
+
+def test_lista_de_gravacoes_com_banco_fora_do_ar_responde_500_em_vez_de_lista_vazia(client, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:s@127.0.0.1:1/rpa_teste")
+
+    r = client.get("/api/json-files")
+
+    assert r.status_code == 500
+    assert "banco" in r.json["error"].lower()

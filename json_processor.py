@@ -38,7 +38,7 @@ _TOOL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def is_valid_tool_name(name) -> bool:
     """Nome de tool precisa ser um identificador Python: vira `from tools.x import x` no script."""
-    return isinstance(name, str) and bool(_TOOL_NAME_RE.match(name))
+    return isinstance(name, str) and bool(_TOOL_NAME_RE.fullmatch(name))  # fullmatch: "$" aceitaria "nome\n"
 
 
 def _screen_key(url: str) -> str:
@@ -313,6 +313,8 @@ def annotate_masked(named_steps: list[dict]) -> list[dict]:
             if a.get("masked") and not a.get("secret"):
                 a["masked_id"] = f"g{gi}a{ai}"
                 host = _slug(urlparse(a.get("url", "")).hostname or "app").upper()
+                if host[:1].isdigit():
+                    host = f"HOST_{host}"  # ERP por IP: nome de secret não pode começar com dígito
                 campo = _slug(a.get("target_text", "")).upper() or "SENHA"
                 fields.append({
                     "id": a["masked_id"],

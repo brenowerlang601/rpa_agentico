@@ -93,12 +93,13 @@ def test_nome_sugerido_e_um_nome_de_secret_valido():
     assert all(secrets_store.is_valid_name(c["suggested_name"]) for c in jp.annotate_masked(passos))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: host por IP gera sugestão começando com dígito (192_168_0_10_SENHA), "
-                                       "que secrets_store.is_valid_name recusa")
 def test_nome_sugerido_para_erp_acessado_por_ip_e_valido():
     passos = [{"tool_name": "t", "actions": [senha("Senha", "http://192.168.0.10:8080/systextil/login.jsp")]}]
 
-    assert secrets_store.is_valid_name(jp.annotate_masked(passos)[0]["suggested_name"])
+    sugerido = jp.annotate_masked(passos)[0]["suggested_name"]
+
+    assert secrets_store.is_valid_name(sugerido)
+    assert sugerido == "HOST_192_168_0_10_SENHA"
 
 
 # ---------------------------------------------------------------------------

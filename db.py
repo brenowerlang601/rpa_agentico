@@ -49,14 +49,17 @@ def _write(sql: str, params: tuple, label: str) -> None:
 
 
 def _get_connection():
-    from urllib.parse import urlparse
+    from urllib.parse import parse_qsl, unquote, urlparse
     url = urlparse(os.getenv("DATABASE_URL"))
     return psycopg2.connect(
         host=url.hostname,
         port=url.port or 5432,
-        dbname=url.path.lstrip("/"),
-        user=url.username,
-        password=url.password,
+        dbname=unquote(url.path.lstrip("/")),
+        # Usuário/senha com @ : / # vêm codificados na URL (%40...) — decodificar
+        user=unquote(url.username) if url.username else url.username,
+        password=unquote(url.password) if url.password else url.password,
+        # Parâmetros da URL (ex.: ?sslmode=require do Postgres gerenciado)
+        **dict(parse_qsl(url.query)),
     )
 
 
@@ -385,8 +388,9 @@ def list_secrets() -> list[dict]:
                 cur.execute("SELECT name, updated_at FROM secrets ORDER BY name")
                 return [dict(r) for r in cur.fetchall()]
     except Exception as e:
+        # Levanta em vez de devolver []: banco fora do ar não pode parecer "nenhum item"
         logger.error(f"[DB ERROR] list_secrets falhou: {e}")
-        return []
+        raise DBError(f"Erro no banco de dados (list_secrets): {e}") from e
 
 
 def get_secret_value(name: str) -> str | None:
@@ -458,8 +462,9 @@ def list_gravacoes() -> list[str]:
                 cur.execute("SELECT name FROM gravacoes ORDER BY name")
                 return [r[0] for r in cur.fetchall()]
     except Exception as e:
+        # Levanta em vez de devolver []: banco fora do ar não pode parecer "nenhum item"
         logger.error(f"[DB ERROR] list_gravacoes falhou: {e}")
-        return []
+        raise DBError(f"Erro no banco de dados (list_gravacoes): {e}") from e
 
 
 # ---------------------------------------------------------------------------

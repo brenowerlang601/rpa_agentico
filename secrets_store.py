@@ -21,7 +21,7 @@ NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 def is_valid_name(name) -> bool:
-    return isinstance(name, str) and bool(NAME_RE.match(name))
+    return isinstance(name, str) and bool(NAME_RE.fullmatch(name))  # fullmatch: "$" aceitaria "NOME\n"
 
 
 def _read_file() -> dict:
@@ -29,6 +29,20 @@ def _read_file() -> dict:
         return json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
         return {}
+
+
+def _read_file_para_escrita() -> dict:
+    """
+    Como _read_file, mas recusa arquivo corrompido: regravar a partir de {} apagaria os
+    outros secrets (que ainda dá para recuperar à mão no arquivo).
+    """
+    try:
+        return json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except ValueError as e:
+        raise ValueError(f"{SECRETS_FILE.name} está corrompido — corrija ou remova o arquivo "
+                         f"antes de salvar secrets ({e})") from e
 
 
 def _write_file(data: dict) -> None:
@@ -64,7 +78,7 @@ def set_secret(name: str, value: str) -> None:
     if db.db_enabled():
         db.upsert_secret(name, value)
         return
-    data = _read_file()
+    data = _read_file_para_escrita()
     data[name] = {"value": value, "updated_at": datetime.now(timezone.utc).isoformat()}
     _write_file(data)
 

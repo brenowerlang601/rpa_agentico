@@ -270,7 +270,11 @@ def api_run_workflow_by_id(workflow_id: int):
 @app.route("/api/json-files")
 def api_json_files():
     """Retorna todas as gravações disponíveis (banco ou pasta json_rpa/)."""
-    return jsonify([{"name": n, "stem": Path(n).stem} for n in gravacoes_store.listar()])
+    try:
+        nomes = gravacoes_store.listar()
+    except DBError as e:
+        return _error(str(e), 500)
+    return jsonify([{"name": n, "stem": Path(n).stem} for n in nomes])
 
 
 @app.route("/api/load-json", methods=["POST"])
@@ -312,6 +316,9 @@ def api_tool_new():
     name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     if not is_valid_tool_name(name):
         return _error("Nome inválido: use letras, números e _ (sem começar com número)")
+    # Validar antes de gravar no banco: código que não é texto falharia só no disco
+    if not isinstance(code, str):
+        return _error("O código da tool precisa ser texto")
     p = TOOLS_DIR / f"{name}.py"
     if p.exists():
         return _error(f"Já existe uma tool chamada '{name}'", 409)
@@ -779,7 +786,10 @@ def api_generate_tools():
         return _error("Nenhum step para processar")
 
     # Campos de senha: o valor mascarado é trocado pelo secret escolhido na interface
-    known = {x["name"] for x in secrets_store.list_secrets()}
+    try:
+        known = {x["name"] for x in secrets_store.list_secrets()}
+    except DBError as e:
+        return _error(str(e), 500)
     unknown = sorted(set(secrets_map.values()) - known)
     if unknown:
         return _error(f"Secret não cadastrado: {', '.join(unknown)}")
@@ -899,8 +909,12 @@ def api_secrets_list():
     for p in TOOLS_DIR.glob("*.py"):
         for name in re.findall(r"""secret\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)""", p.read_text(encoding="utf-8")):
             usage.setdefault(name, []).append(p.stem)
+    try:
+        cadastrados = secrets_store.list_secrets()
+    except DBError as e:
+        return _error(str(e), 500)
     items = []
-    for item in secrets_store.list_secrets():
+    for item in cadastrados:
         updated = item.get("updated_at")
         items.append({
             "name": item["name"],

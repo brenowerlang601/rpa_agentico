@@ -50,9 +50,6 @@ def test_is_valid_name_recusa_minusculas_inicio_numerico_e_outros_tipos(nome):
     assert secrets_store.is_valid_name(nome) is False
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: NAME_RE usa '$', que casa antes de um '\\n' final — 'ERP_SENHA\\n' é aceito como "
-    "nome válido (deveria usar fullmatch ou '\\Z')"))
 def test_is_valid_name_recusa_quebra_de_linha_no_fim():
     assert secrets_store.is_valid_name("ERP_SENHA\n") is False
 
@@ -204,9 +201,6 @@ def test_arquivo_com_bytes_invalidos_e_lido_como_vazio(arquivo):
     assert secrets_store.list_secrets() == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: com secrets.json corrompido, _read_file devolve {} e set_secret regrava o arquivo só "
-    "com o secret novo — os demais (recuperáveis à mão) são apagados sem aviso"))
 def test_set_secret_com_arquivo_corrompido_nao_apaga_o_conteudo(arquivo):
     corrompido = '{"ERP_SENHA": {"value": "s3nh@", "updated_at": "2026-01-01"},'
     arquivo.write_text(corrompido, encoding="utf-8")
@@ -281,10 +275,11 @@ def test_banco_fora_do_ar_set_e_delete_levantam_dberror_sem_criar_arquivo(monkey
 
 
 def test_banco_fora_do_ar_leituras_nao_caem_para_o_arquivo_local(monkeypatch, arquivo):
-    """Comportamento atual: leitura devolve vazio (ver xfail de list_secrets em test_db.py)."""
+    """Leitura de valor devolve vazio; a listagem levanta DBError (a queda não vira 'aba vazia')."""
     arquivo.write_text(json.dumps({"A": {"value": "local", "updated_at": "x"}}), encoding="utf-8")
     monkeypatch.setenv("DATABASE_URL", BANCO_FORA_DO_AR)
 
     assert secrets_store.get_secret("A") is None
     assert secrets_store.all_values() == {}
-    assert secrets_store.list_secrets() == []
+    with pytest.raises(DBError):
+        secrets_store.list_secrets()

@@ -181,9 +181,6 @@ def test_criar_tool_com_banco_inacessivel_nao_cria_o_arquivo(client, monkeypatch
     assert not Path("tools/nova_tool.py").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: código que não é texto (ex.: número) é gravado no "
-                                       "banco e só depois falha ao escrever o disco — banco fica "
-                                       "com a tool e o disco sem")
 def test_criar_tool_com_codigo_que_nao_e_texto_e_recusado_sem_gravar_no_banco(pg, client):
     try:
         r = client.post("/api/tool/new", json={"name": "nova_tool", "code": 123})

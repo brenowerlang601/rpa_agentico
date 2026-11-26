@@ -213,7 +213,6 @@ def test_llm_tira_as_cercas_markdown_do_codigo(openai_falso, resposta):
     assert tool_generator._call_llm("p") == "async def t(page) -> bool:\n    return True"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: texto antes da cerca ```python não é removido e vai para a tool")
 def test_llm_tira_texto_explicativo_antes_da_cerca(openai_falso):
     openai_falso.resposta = "Aqui está a função:\n```python\nasync def t(page) -> bool:\n    return True\n```"
 
@@ -390,7 +389,6 @@ def test_tool_do_agente_rejeitada_nao_e_salva(llm_falso, monkeypatch, tmp_path):
     assert list((tmp_path / "tools").iterdir()) == []
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: tool do modo ao vivo é salva sem a 1ª linha '# actions_fp:' obrigatória")
 def test_tool_do_agente_tem_fingerprint_no_cabecalho(llm_falso, monkeypatch, tmp_path):
     _respostas(monkeypatch, "a")
 
@@ -398,3 +396,22 @@ def test_tool_do_agente_tem_fingerprint_no_cabecalho(llm_falso, monkeypatch, tmp
 
     primeira = (tmp_path / "tools" / "login_erp.py").read_text(encoding="utf-8").splitlines()[0]
     assert primeira.startswith("# actions_fp: ") and primeira.split(":", 1)[1].strip()
+
+
+
+class _OutroResultadoAgente:
+    def model_actions(self):
+        return [{"click_element": {"index": 7}}, {"input_text": {"index": 8, "text": "XYZ"}}]
+
+
+def test_tool_do_agente_com_acoes_diferentes_tem_fingerprint_diferente(llm_falso, monkeypatch, tmp_path):
+    """O fingerprint decide se a tool é reaproveitada: ações diferentes não podem colidir."""
+    _respostas(monkeypatch, "a", "a")
+
+    asyncio.run(tool_generator.generate_tool_from_agent_result("tarefa_a", _ResultadoAgente()))
+    asyncio.run(tool_generator.generate_tool_from_agent_result("tarefa_b", _OutroResultadoAgente()))
+
+    fp_a = (tmp_path / "tools" / "tarefa_a.py").read_text(encoding="utf-8").splitlines()[0]
+    fp_b = (tmp_path / "tools" / "tarefa_b.py").read_text(encoding="utf-8").splitlines()[0]
+    assert fp_a.startswith("# actions_fp: ") and fp_b.startswith("# actions_fp: ")
+    assert fp_a != fp_b
